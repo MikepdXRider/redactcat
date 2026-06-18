@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with code in this repository.
-
 ## Working Directory
 
 All commands run from the project root. The virtual environment is managed by `uv`.
@@ -16,7 +14,7 @@ uv sync
 uv run pytest
 
 # Run a single test
-uv run pytest tests/test_health.py::test_health_returns_ok
+uv run pytest tests/path/to/test.py::test_name
 
 # Run tests verbose
 uv run pytest -v
@@ -64,7 +62,18 @@ All SQLAlchemy ORM models live in a single file. They share `Base` from `app/dat
 All Pydantic schemas live in a single file. Naming conventions:
 - `XRead` — response DTOs (returned from endpoints)
 - `XCreate` — request body schemas (accepted by endpoints)
+- `XUpdate` — partial update schemas (all fields optional)
+- `XLogin` — auth input schemas; intentionally omit validation constraints (e.g. no `min_length` on password) so wrong credentials always return 401, never 422
 - All schemas use `ConfigDict(from_attributes=True)` to read from ORM objects
+
+Shared validation values that appear in multiple schemas (e.g. password length) must be defined as a module-level constant and referenced by name — not repeated inline:
+
+```python
+PASSWORD_MIN_LENGTH = 8
+
+class UserCreate(BaseModel):
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH)
+```
 
 ### Services (`app/services/`)
 
@@ -83,7 +92,9 @@ def my_endpoint(current_user: User = Depends(get_current_user)) -> ...:
     ...
 ```
 
-JWT tokens are signed with the `JWT_SECRET` env var using HS256. Passwords are hashed with bcrypt via `passlib`.
+JWT tokens are signed with the `JWT_SECRET` env var using HS256. `JWT_SECRET` is required — the app will not start without it. Passwords are hashed directly with bcrypt (`bcrypt.hashpw` / `bcrypt.checkpw`). passlib was removed due to incompatibility with bcrypt 5.x.
+
+**Token pattern:** access tokens are stateless JWTs (30min, no DB storage). Refresh tokens are opaque strings (`secrets.token_urlsafe(32)`) stored in the `refresh_tokens` table. Each `POST /auth/refresh` call **rotates** the pair — the old refresh token row is deleted and a new one is issued. Logout is a DB delete of the refresh token row; the access token expires naturally.
 
 ### Cross-User Isolation
 
@@ -116,16 +127,14 @@ Job files are not retained after the user downloads the redacted output. On down
 
 The `UsageEvent` row is the only persistent record of a job. It records aggregate stats (file type, entity count) for analytics — no PII content.
 
-### Request Lifecycle
-
-1. FastAPI resolves dependencies (`get_db`, `get_current_user`) before calling the endpoint
-2. Endpoint runs queries against the injected `Session`
-3. FastAPI serializes the return value using the `response_model` Pydantic schema
-4. `get_db` closes the session in `finally` after the response is sent
-
 ### Database Sessions
 
-Use `Depends(get_db)` to inject a session. Commit explicitly with `db.commit()`. After a write + commit, re-fetch with `joinedload` (single record) to return a fully populated response — `db.refresh()` does not load relationships.
+Use `Depends(get_db)` to inject a session. Commit explicitly with `db.commit()`.
+
+After a write + commit, how to return the updated object depends on the response schema:
+
+- **Flat response (no relationships)** — `db.refresh(obj)` is fine; it reloads the row's own columns.
+- **Response includes relationships** — re-fetch with `joinedload` instead. `db.refresh()` does not eagerly load relationships; accessing them afterward fires a lazy query per relationship during Pydantic serialization (N+1).
 
 ### Eager Loading
 
@@ -154,7 +163,17 @@ raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 ### Testing
 
-The `client` fixture in `tests/conftest.py` spins up an isolated in-memory SQLite database for every test. Override `get_db` via `app.dependency_overrides` — never touch the production engine. AWS service calls (Comprehend, Textract, S3) are always mocked in tests.
+Before writing tests for any new endpoint, invoke the `api-testing` skill (`/api-testing`). It encodes the full coverage matrix for this project — auth enforcement, cross-user isolation, DTO shape, DB-level assertions, and auth lifecycle. Running it proactively prevents gap reviews after the fact.
+
+`tests/conftest.py` provides three fixtures that compose together:
+
+- `engine` — creates a fresh in-memory SQLite engine with `StaticPool`, runs `create_all`, tears down with `drop_all` after the test
+- `db` — yields a `Session` bound to the engine for **DB-level assertions** (use when behavior isn't surfaced by any endpoint response)
+- `client` — yields a `TestClient` with `get_db` overridden to use the same engine
+
+`StaticPool` forces all connections to reuse one underlying connection so the test's `db` session sees data committed by the app during a request. Override `get_db` via `app.dependency_overrides` — never touch the production engine. AWS service calls (Comprehend, Textract, S3) are always mocked in tests.
+
+When adding tests for endpoints that call AWS services, mock at the service-function level using `unittest.mock.patch`. Add the specific patch targets here as each service is built.
 
 ## Code Standards
 
@@ -163,6 +182,12 @@ The `client` fixture in `tests/conftest.py` spins up an isolated in-memory SQLit
 - No premature abstraction; name things accurately
 - No dead code, commented-out blocks, or unresolved TODOs in final output
 - Every function should do one thing and be nameable in plain English
+
+## Linting Hook
+
+A `PostToolUse` hook in `.claude/settings.json` runs ruff automatically after every `Write`, `Edit`, or `MultiEdit` on a `.py` file. It auto-fixes what it can, then blocks if unfixable issues remain (undefined names, syntax errors).
+
+**Consequence for multi-step edits:** any intermediate file state must be lint-clean. If a change requires adding an import and the code that uses it, or removing code and its import together, do it in a single `Write` of the full file — not as two sequential `Edit` calls. Two-step edits that create a lint-invalid intermediate state will be blocked by the hook.
 
 ## Git
 
@@ -175,12 +200,13 @@ The `client` fixture in `tests/conftest.py` spins up an isolated in-memory SQLit
 
 ## After Every Meaningful Change
 
-Before committing, explicitly state the answers to these four questions and wait for user confirmation:
+Before committing, explicitly state the answers to these five questions and wait for user confirmation:
 
 1. **What could go wrong with this?** — at least one weakness or risk
 2. **What did I assume?** — anything that could break under different conditions
 3. **Does CLAUDE.md need an update?** — if a decision or pattern was established, document it
 4. **Does the README need an update?** — if the public-facing setup or structure changed
+5. **Is test coverage complete?** — for each new endpoint: auth enforcement, input validation, cross-user isolation (if applicable), exact response shape, and any DB-side effects not surfaced by HTTP. Name any gaps.
 
 ## What Not To Do
 

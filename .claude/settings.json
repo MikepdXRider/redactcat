@@ -1,0 +1,16 @@
+{
+  "includeCoAuthoredBy": false,
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(jq -r '.tool_input.file_path' /dev/stdin); case \"$file\" in *.py) ;; *) exit 0 ;; esac; dir=$(dirname \"$file\"); while [ \"$dir\" != \"/\" ] && [ ! -f \"$dir/pyproject.toml\" ]; do dir=$(dirname \"$dir\"); done; cd \"$dir\" && uv run ruff check --fix \"$file\" >/dev/null 2>&1; if ! out=$(uv run ruff check \"$file\" 2>&1); then { echo \"Ruff lint issues in $file — fix in place; do NOT run ruff format or collapse multi-line statements:\"; echo \"$out\"; } >&2; exit 2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
