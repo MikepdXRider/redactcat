@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models import RefreshToken, User
-from app.schemas import TokenResponse, UserCreate
+from app.schemas import TokenResponse, UserCreate, UserLogin, UserRead
 
 router = APIRouter(tags=["auth"])
 
@@ -37,6 +38,26 @@ def store_refresh_token(user_id: int, db: Session) -> str:
     expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     db.add(RefreshToken(token=token, user_id=user_id, expires_at=expires_at))
     return token
+
+
+@router.post("/login", response_model=TokenResponse)
+def login(body: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
+    user = db.scalar(select(User).where(User.email == body.email))
+    if not user or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    refresh_token = store_refresh_token(user.id, db)
+    db.commit()
+
+    return TokenResponse(
+        access_token=create_access_token(user.id),
+        refresh_token=refresh_token,
+    )
+
+
+@router.get("/me", response_model=UserRead)
+def me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
