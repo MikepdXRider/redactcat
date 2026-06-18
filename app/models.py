@@ -17,11 +17,13 @@ class User(Base):
     )
 
 
-class RevokedToken(Base):
-    __tablename__ = "revoked_tokens"
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    jti: Mapped[str] = mapped_column(String, unique=True, index=True)
-    revoked_at: Mapped[datetime] = mapped_column(
+    token: Mapped[str] = mapped_column(String, unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(index=True)
+    expires_at: Mapped[datetime] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
