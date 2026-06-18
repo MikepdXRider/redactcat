@@ -128,3 +128,9 @@ redactcat/
 5. **Deliver** — user downloads the redacted output; all job data and S3 objects are deleted
 
 See `CLAUDE.md` for contributor conventions.
+
+## AI-Assisted Development
+
+This project uses [Claude Code](https://claude.com/claude-code) as a development tool. Every change — architecture decisions, implementation, tests, and documentation — is reviewed and approved by the developer before it is committed. The expectation is that the developer can explain any decision, trade-off, or line of code in the repository.
+
+The workflow is deliberate: plan the approach, implement, review the diff, run tests, then commit. AI accelerates execution but does not replace engineering judgment — all technical decisions and their rationale are documented in the Architecture Decisions section of this README and in `CLAUDE.md`.
