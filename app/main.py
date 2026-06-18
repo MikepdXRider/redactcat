@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.database import Base, engine
-from app.modules.auth import router as auth_router
-from app.modules.health import router as health_router
-from app.modules.users import router as users_router
+from app.routers.auth import router as auth_router
+from app.routers.health import router as health_router
+from app.routers.users import router as users_router
 
 
 @asynccontextmanager
