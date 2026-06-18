@@ -74,6 +74,26 @@ def test_update_password_wrong_current(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_update_new_password_without_current_password(client: TestClient) -> None:
+    tokens = _register(client)
+    response = client.patch(
+        "/users/me",
+        json={"new_password": "newpassword1"},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 401
+
+
+def test_update_new_password_too_short(client: TestClient) -> None:
+    tokens = _register(client)
+    response = client.patch(
+        "/users/me",
+        json={"current_password": "secret123", "new_password": "short"},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 422
+
+
 def test_update_unauthenticated(client: TestClient) -> None:
     response = client.patch("/users/me", json={"email": "new@example.com"})
     assert response.status_code == 401
