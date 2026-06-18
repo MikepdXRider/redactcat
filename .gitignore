@@ -7,4 +7,6 @@ __pycache__/
 .pytest_cache/
 dist/
 *.egg-info/
-.claude
+.claude/cache
+.claude/history.jsonl
+.claude/sessions

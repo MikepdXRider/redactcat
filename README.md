@@ -1,12 +1,57 @@
 # redactcat
 
-A FastAPI service for redacting PII from documents. Users submit text, PDFs, or images; AWS Comprehend detects PII entities; users review and confirm suggested redactions; the service delivers a permanently redacted output. All job data is ephemeral — deleted after download.
+A production-grade FastAPI service for redacting PII from documents. Users submit text, PDFs, or images; AWS Comprehend detects PII entities; users review and confirm suggested redactions; the service delivers a permanently redacted output. All job data is ephemeral — deleted after download.
 
-## Prerequisites
+## Tech Stack
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- AWS credentials with access to Comprehend, Textract, and S3
+| Layer | Choice | Rationale |
+|-------|--------|-----------|
+| Framework | FastAPI | Async-ready, OpenAPI docs out of the box, first-class dependency injection |
+| ORM | SQLAlchemy 2.0 | `Mapped`/`mapped_column` declarative syntax, explicit session control |
+| Auth | PyJWT + bcrypt | passlib is incompatible with bcrypt 5.x; rolling own keeps the dependency surface minimal |
+| Validation | Pydantic v2 | Co-designed with FastAPI; field-level constraints enforced at the request boundary |
+| Package management | uv | Near-instant installs, lockfile determinism, replaces pip + venv |
+| Linting | Ruff | Single tool replaces flake8, isort, and pyupgrade |
+| Testing | pytest + SQLite in-memory | Fast, fully isolated, no external services required for CI |
+| PII detection | AWS Comprehend | Managed NLP; sync API handles up to 100KB inline with no infrastructure to maintain |
+| File extraction | PyMuPDF + Textract | PyMuPDF for text-native PDFs; Textract for scanned PDFs and images |
+| Redaction | PyMuPDF | `add_redact_annot` + `apply_redactions` produces permanent, non-reversible redaction |
+| File storage | S3 (ephemeral) | Files deleted immediately after download; presigned URLs for secure delivery |
+
+## Architecture Decisions
+
+**Stateless JWT + rotating refresh tokens**
+Access tokens are short-lived JWTs (30min) with no server-side storage. Refresh tokens are opaque strings stored in the `refresh_tokens` table. Each `/auth/refresh` call rotates the pair — the old row is deleted and a new token pair is issued. Logout is a single DB delete. This avoids a token blacklist while giving stolen refresh tokens only a one-use window before detection.
+
+**Naive UTC datetimes**
+All datetimes are computed in UTC and stored timezone-naive (`datetime.now(UTC).replace(tzinfo=None)`). SQLite has no native timezone support; PostgreSQL `TIMESTAMP WITHOUT TIME ZONE` accepts naive values. The UTC convention is enforced at the application layer — no mixed-offset data enters the DB.
+
+**Cross-user isolation via 404**
+Endpoints that access user-owned resources raise `404` (not `403`) when a resource exists but belongs to another user. This avoids confirming resource existence to unauthorized callers.
+
+**Ephemeral job storage**
+Job files are deleted from S3 immediately after the user downloads the redacted output. The only persistent record is a `UsageEvent` row with aggregate stats (no PII). This limits data retention exposure and eliminates a class of compliance risk.
+
+**Single `models.py` and `schemas.py`**
+All ORM models and Pydantic schemas live in one file each. This avoids circular imports, makes the full data model visible at a glance, and keeps `Base.metadata.create_all` deterministic.
+
+**Direct bcrypt (no passlib)**
+passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 5.x (removed `__about__` attribute, strict 72-byte enforcement). bcrypt is used directly via `hashpw`/`checkpw`.
+
+## API Reference
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | /health | — | Health check |
+| POST | /auth/register | — | Register and auto-login; returns access + refresh token pair |
+| POST | /auth/login | — | Login with credentials; returns token pair |
+| POST | /auth/logout | ✓ | Delete refresh token row; invalidates session |
+| POST | /auth/refresh | — | Rotate refresh token; returns new token pair |
+| GET | /users/me | ✓ | Get current user profile |
+| PATCH | /users/me | ✓ | Update email or password |
+| DELETE | /users/me | ✓ | Delete account and all active sessions |
+
+Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
 
 ## Quickstart
 
@@ -27,19 +72,22 @@ uv run pytest
 uv run ruff check .
 ```
 
-The API is served at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
-
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | No | SQLAlchemy connection string. Defaults to `sqlite:///./redactcat.db` |
-| `APP_ENV` | No | `development` or `production`. Defaults to `development` |
-| `JWT_SECRET` | Yes (non-dev) | Secret key for signing JWT tokens |
-| `AWS_ACCESS_KEY_ID` | Yes | AWS credentials for Comprehend, Textract, S3 |
-| `AWS_SECRET_ACCESS_KEY` | Yes | AWS credentials |
-| `AWS_REGION` | Yes | AWS region (e.g. `us-east-1`) |
-| `S3_BUCKET` | Yes | S3 bucket name for ephemeral job file storage |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | No | `sqlite:///./redactcat.db` | SQLAlchemy connection string |
+| `APP_ENV` | No | `development` | `development` or `production` |
+| `JWT_SECRET` | **Yes** | — | Secret for signing JWTs (32+ chars); app will not start without it |
+| `JWT_ALGORITHM` | No | `HS256` | JWT signing algorithm |
+| `JWT_EXPIRE_MINUTES` | No | `30` | Access token lifetime in minutes |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | No | `30` | Refresh token lifetime in days |
+| `AWS_ACCESS_KEY_ID` | Yes† | — | AWS credentials |
+| `AWS_SECRET_ACCESS_KEY` | Yes† | — | AWS credentials |
+| `AWS_REGION` | Yes† | — | AWS region (e.g. `us-east-1`) |
+| `S3_BUCKET` | Yes† | — | S3 bucket for ephemeral job file storage |
+
+†Required for job features (Comprehend, Textract, S3). Auth endpoints run locally without AWS credentials.
 
 ## Project Structure
 
@@ -47,15 +95,15 @@ The API is served at `http://localhost:8000`. Interactive docs at `http://localh
 redactcat/
 ├── app/
 │   ├── config.py          # Settings (env vars via pydantic-settings)
-│   ├── database.py        # SQLAlchemy engine, session, and base model
-│   ├── dependencies.py    # Shared FastAPI dependencies (auth, etc.)
-│   ├── main.py            # FastAPI app entry point
+│   ├── database.py        # SQLAlchemy engine, session factory, Base, get_db
+│   ├── dependencies.py    # Shared FastAPI dependencies (get_current_user)
+│   ├── main.py            # FastAPI app entry point — registers routers
 │   ├── models.py          # All SQLAlchemy ORM models
 │   ├── schemas.py         # All Pydantic request/response schemas
-│   ├── modules/           # Feature routers
-│   │   ├── auth.py        # Registration and login
+│   ├── modules/           # Feature routers — one file per domain
+│   │   ├── auth.py        # Register, login, logout, token refresh
 │   │   ├── health.py      # Health check
-│   │   └── jobs.py        # Job creation, entity retrieval, redaction
+│   │   └── users.py       # User profile (get, update, delete)
 │   └── services/          # Business logic and AWS integrations
 │       ├── cleanup.py     # Post-download job deletion
 │       ├── detection.py   # AWS Comprehend PII detection
@@ -63,20 +111,20 @@ redactcat/
 │       ├── redaction.py   # Apply redactions (PyMuPDF / string substitution)
 │       └── storage.py     # S3 upload/download/delete
 ├── tests/
-│   ├── conftest.py        # Shared fixtures (in-memory DB, TestClient)
-│   ├── test_auth.py
-│   ├── test_health.py
-│   └── test_jobs.py
+│   ├── conftest.py        # Fixtures: engine, db session, TestClient
+│   ├── test_auth.py       # Auth endpoint tests
+│   ├── test_health.py     # Health check test
+│   └── test_users.py      # User profile endpoint tests
 ├── .env.example           # Environment variable template
 └── pyproject.toml         # Dependencies and tool config
 ```
 
-See `CLAUDE.md` for contributor conventions.
-
 ## How It Works
 
 1. **Submit** — user POSTs text or uploads a file (PDF, image)
-2. **Detect** — AWS Comprehend scans for PII entities; Textract extracts text from non-text files
-3. **Review** — API returns a list of detected entities with locations for user confirmation
-4. **Redact** — user submits confirmed entity IDs; service applies permanent redactions
-5. **Deliver** — user downloads the redacted output; all job data is deleted
+2. **Detect** — AWS Comprehend scans for PII entities; Textract extracts text from scanned files
+3. **Review** — API returns detected entities with locations for user confirmation
+4. **Redact** — user submits confirmed entity IDs; service applies permanent redactions via PyMuPDF
+5. **Deliver** — user downloads the redacted output; all job data and S3 objects are deleted
+
+See `CLAUDE.md` for contributor conventions.
