@@ -40,7 +40,7 @@ app/
   main.py            # FastAPI app entry point — registers routers
   models.py          # All SQLAlchemy ORM models
   schemas.py         # All Pydantic request/response schemas
-  modules/           # Feature routers — one file per domain
+  routers/           # Feature routers — one file per domain
   services/          # Business logic and external integrations
     detection.py     # AWS Comprehend PII detection
     extraction.py    # Text extraction from PDFs and images (Textract)
@@ -51,7 +51,7 @@ app/
 
 ### Adding Feature Modules
 
-Create a file in `app/modules/` that defines `router = APIRouter(...)`, then register it explicitly in `app/main.py` with `app.include_router(...)`. See `app/modules/README.md` for the pattern.
+Create a file in `app/routers/` that defines `router = APIRouter(...)`, then register it explicitly in `app/main.py` with `app.include_router(...)`. See `app/routers/README.md` for the pattern.
 
 ### Models (`app/models.py`)
 
@@ -108,15 +108,9 @@ if not job or job.user_id != current_user.id:
 
 ### Job Lifecycle
 
-```
-pending → processing → awaiting_review → complete → [deleted]
-```
+Text jobs: created with entities → user reviews → redacted output returned → job deleted.
 
-- `pending` — job row created, file uploaded to S3 (file jobs) or text stored
-- `processing` — extraction and Comprehend detection in progress
-- `awaiting_review` — entities persisted, waiting for user redaction selection
-- `complete` — redacted output ready for download
-- deleted — triggered on download; job row, entities, and S3 objects removed; `UsageEvent` preserved
+File jobs (not yet implemented) will introduce async processing stages and a `status` column. Status is intentionally omitted until there is an observable intermediate state that clients need to act on.
 
 ### Ephemeral Storage (S3)
 
@@ -174,6 +168,11 @@ Before writing tests for any new endpoint, invoke the `api-testing` skill (`/api
 `StaticPool` forces all connections to reuse one underlying connection so the test's `db` session sees data committed by the app during a request. Override `get_db` via `app.dependency_overrides` — never touch the production engine. AWS service calls (Comprehend, Textract, S3) are always mocked in tests.
 
 When adding tests for endpoints that call AWS services, mock at the service-function level using `unittest.mock.patch`. Add the specific patch targets here as each service is built.
+
+Current patch targets:
+- `app.routers.jobs.detect_pii_entities` — mock in `tests/test_jobs.py` to control Comprehend output without a real AWS call
+
+To test a service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 
 ## Code Standards
 
