@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+PASSWORD_MIN_LENGTH = 8
+
 
 class HealthRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -11,7 +13,7 @@ class HealthRead(BaseModel):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH)
 
 
 class UserLogin(BaseModel):
@@ -35,5 +37,11 @@ class TokenResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class UserUpdate(BaseModel):
+    email: EmailStr | None = None
+    current_password: str | None = None
+    new_password: str | None = Field(default=None, min_length=PASSWORD_MIN_LENGTH)
 
 

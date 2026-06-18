@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import RefreshToken, User
-from app.schemas import RefreshRequest, TokenResponse, UserCreate, UserLogin, UserRead
+from app.schemas import RefreshRequest, TokenResponse, UserCreate, UserLogin
 
 router = APIRouter(tags=["auth"])
 
@@ -91,11 +91,6 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> TokenRespons
         access_token=create_access_token(user_id),
         refresh_token=new_refresh_token,
     )
-
-
-@router.get("/me", response_model=UserRead)
-def me(current_user: User = Depends(get_current_user)) -> User:
-    return current_user
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
