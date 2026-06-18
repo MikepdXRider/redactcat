@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import User
+from app.models import RefreshToken, User
 from app.modules.auth import hash_password, verify_password
 from app.schemas import UserRead, UserUpdate
 
@@ -35,3 +35,14 @@ def update_me(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    db.execute(delete(RefreshToken).where(RefreshToken.user_id == current_user.id))
+    db.delete(current_user)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

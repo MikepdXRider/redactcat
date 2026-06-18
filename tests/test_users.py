@@ -1,4 +1,8 @@
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
+
+from app.models import RefreshToken
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "secret123") -> dict:
@@ -96,4 +100,39 @@ def test_update_new_password_too_short(client: TestClient) -> None:
 
 def test_update_unauthenticated(client: TestClient) -> None:
     response = client.patch("/users/me", json={"email": "new@example.com"})
+    assert response.status_code == 401
+
+
+# --- DELETE /users/me ---
+
+def test_delete_me(client: TestClient) -> None:
+    tokens = _register(client)
+    response = client.delete("/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    assert response.status_code == 204
+
+
+def test_delete_me_purges_refresh_tokens(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    client.delete("/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    rows = db.scalars(select(RefreshToken)).all()
+    assert rows == []
+
+
+def test_delete_me_access_token_rejected_after(client: TestClient) -> None:
+    tokens = _register(client)
+    client.delete("/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    response = client.get("/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    assert response.status_code == 401
+
+
+def test_delete_me_login_fails_after(client: TestClient) -> None:
+    _register(client)
+    tokens = client.post("/auth/login", json={"email": "user@example.com", "password": "secret123"}).json()
+    client.delete("/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    response = client.post("/auth/login", json={"email": "user@example.com", "password": "secret123"})
+    assert response.status_code == 401
+
+
+def test_delete_me_unauthenticated(client: TestClient) -> None:
+    response = client.delete("/users/me")
     assert response.status_code == 401
