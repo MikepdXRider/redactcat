@@ -50,6 +50,9 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | GET | /users/me | ✓ | Get current user profile |
 | PATCH | /users/me | ✓ | Update email or password |
 | DELETE | /users/me | ✓ | Delete account and all active sessions |
+| POST | /jobs/text | ✓ | Submit text; runs Comprehend PII detection; returns job + entities |
+| GET | /jobs/{id}/entities | ✓ | Re-fetch detected entities for a job |
+| POST | /jobs/{id}/redact | ✓ | Confirm entity IDs to redact; returns redacted text; deletes job |
 
 Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
 
@@ -82,9 +85,7 @@ uv run ruff check .
 | `JWT_ALGORITHM` | No | `HS256` | JWT signing algorithm |
 | `JWT_EXPIRE_MINUTES` | No | `30` | Access token lifetime in minutes |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `30` | Refresh token lifetime in days |
-| `AWS_ACCESS_KEY_ID` | Yes† | — | AWS credentials |
-| `AWS_SECRET_ACCESS_KEY` | Yes† | — | AWS credentials |
-| `AWS_REGION` | Yes† | — | AWS region (e.g. `us-east-1`) |
+| `AWS_PROFILE` | Yes† | — | Named AWS profile from `~/.aws/credentials`; provides credentials and region |
 | `S3_BUCKET` | Yes† | — | S3 bucket for ephemeral job file storage |
 
 †Required for job features (Comprehend, Textract, S3). Auth endpoints run locally without AWS credentials.
@@ -100,7 +101,7 @@ redactcat/
 │   ├── main.py            # FastAPI app entry point — registers routers
 │   ├── models.py          # All SQLAlchemy ORM models
 │   ├── schemas.py         # All Pydantic request/response schemas
-│   ├── modules/           # Feature routers — one file per domain
+│   ├── routers/           # Feature routers — one file per domain
 │   │   ├── auth.py        # Register, login, logout, token refresh
 │   │   ├── health.py      # Health check
 │   │   └── users.py       # User profile (get, update, delete)

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import RefreshToken, User
-from app.modules.auth import hash_password, verify_password
+from app.routers.auth import hash_password, verify_password
 from app.schemas import UserRead, UserUpdate
 
 router = APIRouter(tags=["users"])
