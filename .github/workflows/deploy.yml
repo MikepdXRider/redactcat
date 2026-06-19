@@ -11,33 +11,36 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+      ECR_REPOSITORY: redactcat
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::234308273252:role/redactcat-github-actions
-          aws-region: us-west-2
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/redactcat-github-actions
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push image
         run: |
-          docker build --platform linux/amd64 -t redactcat .
-          docker tag redactcat:latest 234308273252.dkr.ecr.us-west-2.amazonaws.com/redactcat:latest
-          docker push 234308273252.dkr.ecr.us-west-2.amazonaws.com/redactcat:latest
+          docker build --platform linux/amd64 -t $ECR_REPOSITORY .
+          docker tag $ECR_REPOSITORY:latest $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Deploy to App Runner
         run: |
           SERVICE_ARN=$(aws apprunner list-services \
-            --query "ServiceSummaryList[?ServiceName=='redactcat'].ServiceArn | [0]" \
+            --query "ServiceSummaryList[?ServiceName=='$ECR_REPOSITORY'].ServiceArn | [0]" \
             --output text)
           if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
-            echo "Error: App Runner service 'redactcat' not found"
+            echo "Error: App Runner service '$ECR_REPOSITORY' not found"
             exit 1
           fi
           aws apprunner start-deployment \
             --service-arn "$SERVICE_ARN" \
-            --region us-west-2
+            --region ${{ vars.AWS_REGION }}
