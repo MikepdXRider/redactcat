@@ -13,8 +13,8 @@ resource "aws_iam_role" "github_actions" {
       Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:MikepdXRider/redactcat:*"
+        StringEquals = {
+          "token.actions.githubusercontent.com:sub" = "repo:MikepdXRider/redactcat:ref:refs/heads/main"
         }
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
@@ -105,7 +105,10 @@ resource "aws_iam_role_policy" "apprunner_instance" {
       {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter", "ssm:GetParameters"]
-        Resource = aws_ssm_parameter.jwt_secret.arn
+        Resource = [
+          aws_ssm_parameter.jwt_secret.arn,
+          aws_ssm_parameter.database_url.arn,
+        ]
       }
     ]
   })
