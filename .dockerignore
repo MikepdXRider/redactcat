@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+.env
+.env.*
+.pytest_cache
+.ruff_cache
+.claude
+__pycache__
+*.pyc
+*.pyo
+tests/
+redactcat.db

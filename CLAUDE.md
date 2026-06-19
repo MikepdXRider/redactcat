@@ -24,6 +24,12 @@ uv run ruff check .
 
 # Start dev server
 uv run uvicorn app.main:app --reload
+
+# Build Docker image
+docker build -t redactcat .
+
+# Run Docker container locally
+docker run --rm -p 8000:8000 --env-file .env redactcat
 ```
 
 **Dev database:** If models change, delete `redactcat.db` and restart — there are no migrations in development. Tests always use a fresh in-memory database. Alembic migrations will be added before any production/RDS deployment.
