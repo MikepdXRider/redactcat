@@ -46,7 +46,8 @@ def test_scan_returns_entities(client: TestClient) -> None:
         )
     assert response.status_code == 200
     data = response.json()
-    assert set(data.keys()) == {"entities"}
+    assert set(data.keys()) == {"text", "entities"}
+    assert data["text"] == "John Doe lives here"
     assert len(data["entities"]) == 1
     entity = data["entities"][0]
     assert set(entity.keys()) == {"entity_type", "text", "start_offset", "end_offset", "confidence"}
@@ -65,7 +66,7 @@ def test_scan_no_entities_detected(client: TestClient) -> None:
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
         )
     assert response.status_code == 200
-    assert response.json() == {"entities": []}
+    assert response.json() == {"text": "Nothing sensitive here", "entities": []}
 
 
 def test_scan_empty_text(client: TestClient) -> None:
@@ -100,6 +101,16 @@ def test_scan_missing_text(client: TestClient) -> None:
 
 # --- POST /text/redact ---
 
+def _entity(entity_type: str, text: str, start: int, end: int, confidence: float = 0.99) -> dict:
+    return {
+        "entity_type": entity_type,
+        "text": text,
+        "start_offset": start,
+        "end_offset": end,
+        "confidence": confidence,
+    }
+
+
 def test_redact_unauthenticated(client: TestClient) -> None:
     assert client.post(
         "/text/redact",
@@ -122,7 +133,7 @@ def test_redact_returns_redacted_text(client: TestClient) -> None:
         "/text/redact",
         json={
             "text": "John Doe lives here",
-            "entities": [{"start_offset": 0, "end_offset": 8}],
+            "entities": [_entity("NAME", "John Doe", 0, 8)],
         },
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
     )
@@ -150,8 +161,8 @@ def test_redact_right_to_left_ordering(client: TestClient) -> None:
         json={
             "text": "John Smith and Jane",
             "entities": [
-                {"start_offset": 0, "end_offset": 4},
-                {"start_offset": 15, "end_offset": 19},
+                _entity("NAME", "John", 0, 4),
+                _entity("NAME", "Jane", 15, 19),
             ],
         },
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
@@ -168,6 +179,46 @@ def test_redact_empty_text(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
     )
     assert response.status_code == 422
+
+
+def test_redact_text_too_long(client: TestClient) -> None:
+    tokens = _register(client)
+    response = client.post(
+        "/text/redact",
+        json={"text": "x" * 5001, "entities": []},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 422
+
+
+def test_redact_custom_replacement(client: TestClient) -> None:
+    tokens = _register(client)
+    response = client.post(
+        "/text/redact",
+        json={
+            "text": "John Doe lives here",
+            "entities": [_entity("NAME", "John Doe", 0, 8)],
+            "replacement": "******",
+        },
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["redacted_text"] == "****** lives here"
+
+
+def test_redact_empty_replacement_deletes_pii(client: TestClient) -> None:
+    tokens = _register(client)
+    response = client.post(
+        "/text/redact",
+        json={
+            "text": "John Doe lives here",
+            "entities": [_entity("NAME", "John Doe", 0, 8)],
+            "replacement": "",
+        },
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["redacted_text"] == " lives here"
 
 
 def test_redact_missing_fields(client: TestClient) -> None:

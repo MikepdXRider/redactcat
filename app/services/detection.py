@@ -1,14 +1,13 @@
 import boto3
 
-from app.models import JobEntity
+from app.schemas import DetectedEntity
 
 
-def detect_pii_entities(text: str, job_id: int) -> list[JobEntity]:
+def detect_pii_entities(text: str) -> list[DetectedEntity]:
     client = boto3.client("comprehend")
     response = client.detect_pii_entities(Text=text, LanguageCode="en")
     return [
-        JobEntity(
-            job_id=job_id,
+        DetectedEntity(
             entity_type=e["Type"],
             text=text[e["BeginOffset"]: e["EndOffset"]],
             start_offset=e["BeginOffset"],
