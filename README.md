@@ -1,6 +1,6 @@
 # redactcat
 
-A production-grade FastAPI service for redacting PII from documents. Users submit text, PDFs, or images; AWS Comprehend detects PII entities; users review and confirm suggested redactions; the service delivers a permanently redacted output. All job data is ephemeral — deleted after download.
+A FastAPI service for redacting PII from documents. Users submit text, PDFs, or images; AWS Comprehend detects PII entities; users review and confirm suggested redactions; the service delivers a permanently redacted output. All job data is ephemeral — deleted after download.
 
 ## Tech Stack
 
@@ -31,6 +31,9 @@ Endpoints that access user-owned resources raise `404` (not `403`) when a resour
 
 **Ephemeral job storage**
 Job files are deleted from S3 immediately after the user downloads the redacted output. The only persistent record is a `UsageEvent` row with aggregate stats (no PII). This limits data retention exposure and eliminates a class of compliance risk.
+
+**SQLite for MVP, RDS PostgreSQL for production**
+The deployed service currently uses SQLite running in the App Runner container filesystem. SQLite is not durable across deployments — this is an intentional MVP tradeoff that keeps infrastructure simple while the API surface stabilizes. Migration to RDS PostgreSQL is tracked and will happen before the service handles real users. All datetime and schema decisions are made with PostgreSQL compatibility in mind.
 
 **Single `models.py` and `schemas.py`**
 All ORM models and Pydantic schemas live in one file each. This avoids circular imports, makes the full data model visible at a glance, and keeps `Base.metadata.create_all` deterministic.
@@ -196,6 +199,4 @@ See `CLAUDE.md` for contributor conventions.
 
 ## AI-Assisted Development
 
-This project uses [Claude Code](https://claude.com/claude-code) as a development tool. Every change — architecture decisions, implementation, tests, and documentation — is reviewed and approved by the developer before it is committed. The expectation is that the developer can explain any decision, trade-off, or line of code in the repository.
-
-The workflow is deliberate: plan the approach, implement, review the diff, run tests, then commit. AI accelerates execution but does not replace engineering judgment — all technical decisions and their rationale are documented in the Architecture Decisions section of this README and in `CLAUDE.md`.
+This project is built with [Claude Code](https://claude.com/claude-code). Development conventions, architectural constraints, and contribution expectations are documented in `CLAUDE.md` — contributors are expected to read and follow it. All changes, regardless of how they were produced, are the responsibility of the person who commits them.
