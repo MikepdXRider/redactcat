@@ -1,3 +1,4 @@
+# Pytest fixtures — in-memory SQLite engine, db session, and TestClient shared across the test suite
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event

@@ -1,3 +1,4 @@
+# Integration tests for Alembic migrations — verifies upgrade, downgrade, and app behavior against a real file-based SQLite DB
 from contextlib import contextmanager
 
 from alembic import command

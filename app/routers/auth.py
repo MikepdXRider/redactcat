@@ -1,3 +1,10 @@
+"""Auth router.
+
+Stateless JWTs (30min access token) paired with rotating opaque refresh tokens
+stored in the DB. Each /refresh call replaces the old token row; /logout deletes
+it. The access token expires naturally — no blacklist needed.
+"""
+
 import secrets
 from datetime import UTC, datetime, timedelta
 

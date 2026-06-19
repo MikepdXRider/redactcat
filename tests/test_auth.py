@@ -1,3 +1,4 @@
+# Tests for /auth endpoints — register, login, logout, and token refresh
 from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
