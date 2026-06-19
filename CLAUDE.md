@@ -115,7 +115,7 @@ def my_endpoint(current_user: User = Depends(get_current_user)) -> ...:
     ...
 ```
 
-JWT tokens are signed with the `JWT_SECRET` env var using HS256. `JWT_SECRET` is required — the app will not start without it. Passwords are hashed directly with bcrypt (`bcrypt.hashpw` / `bcrypt.checkpw`). passlib was removed due to incompatibility with bcrypt 5.x.
+JWT tokens are signed with the `JWT_SECRET` env var using HS256. `JWT_SECRET` is required — the app will not start without it. `S3_BUCKET` is also required — the app will not start without it. Passwords are hashed directly with bcrypt (`bcrypt.hashpw` / `bcrypt.checkpw`). passlib was removed due to incompatibility with bcrypt 5.x.
 
 **Token pattern:** access tokens are stateless JWTs (30min, no DB storage). Refresh tokens are opaque strings (`secrets.token_urlsafe(32)`) stored in the `refresh_tokens` table. Each `POST /auth/refresh` call **rotates** the pair — the old refresh token row is deleted and a new one is issued. Logout is a DB delete of the refresh token row; the access token expires naturally.
 
@@ -141,16 +141,22 @@ Text passes through in-memory — no PII is written to the database or S3 at any
 
 The scan response shape matches the redact request body exactly, so the client can POST the scan response directly to redact without reshaping. `replacement` defaults to `"[REDACTED]"`; empty string deletes PII.
 
-PDF support will be a separate stateful flow (`/pdf/*`) with S3 ephemeral storage when implemented.
+PDF is a separate stateful flow (`/pdf/*`) backed by S3 ephemeral storage:
 
-### Ephemeral Storage (S3) — Future PDF Flow
+1. `POST /pdf/scan` — validates single-page PDF, uploads to S3, extracts text via Textract, detects PII with Comprehend, maps character offsets to word-level bboxes, returns `{ job_id, entities[] }` with bboxes embedded
+2. Client filters entities
+3. `POST /pdf/redact` — accepts the filtered scan response, downloads PDF from S3, applies PyMuPDF redactions at client-supplied bboxes, returns a presigned download URL, then deletes both S3 objects and the Job row
 
-PDF files will not be retained after the user downloads the redacted output. On download:
-1. Generate a short-TTL presigned S3 URL for the redacted file
-2. Delete original and redacted S3 objects
-3. Delete all DB rows for the job
+Only the `Job` row (job_id, user_id, original_s3_key) and source PDF persist between calls. Entity data and bboxes travel in HTTP payloads — no PII is written to the DB.
 
-This section will be expanded when the PDF flow is implemented.
+### Ephemeral Storage (S3)
+
+PDF files are not retained after the user receives the redacted output. At the end of `POST /pdf/redact`:
+1. Upload redacted PDF to S3
+2. Generate a short-TTL presigned S3 URL (5 min)
+3. Delete original and redacted S3 objects
+4. Delete the Job row
+5. Return the presigned URL
 
 ### SQLite FK Enforcement
 
@@ -212,6 +218,13 @@ When adding tests for endpoints that call AWS services, mock at the service-func
 
 Current patch targets:
 - `app.routers.text.detect_pii_entities` — mock in `tests/test_text.py` to control Comprehend output without a real AWS call
+- `app.routers.pdf.upload_to_s3` — mock in `tests/test_pdf.py` to skip real S3 upload
+- `app.routers.pdf.extract_text_from_pdf_s3` — mock in `tests/test_pdf.py` to return controlled Textract output
+- `app.routers.pdf.detect_pii_entities` — mock in `tests/test_pdf.py` to control Comprehend output
+- `app.routers.pdf.download_from_s3` — mock in `tests/test_pdf.py` (redact endpoint)
+- `app.routers.pdf.delete_from_s3` — mock in `tests/test_pdf.py` (redact endpoint)
+- `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf.py` (redact endpoint)
+- `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf.py` (redact endpoint)
 
 To test a service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 
