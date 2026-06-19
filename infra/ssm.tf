@@ -4,3 +4,10 @@ resource "aws_ssm_parameter" "jwt_secret" {
   value = "placeholder"
   lifecycle { ignore_changes = [value] }
 }
+
+resource "aws_ssm_parameter" "database_url" {
+  name  = "/${var.app_name}/DATABASE_URL"
+  type  = "SecureString"
+  value = "placeholder"
+  lifecycle { ignore_changes = [value] }
+}

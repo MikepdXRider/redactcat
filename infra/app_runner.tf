@@ -8,12 +8,12 @@ resource "aws_apprunner_service" "api" {
       image_configuration {
         port = "8000"
         runtime_environment_variables = {
-          APP_ENV      = "production"
-          DATABASE_URL = "sqlite:///./redactcat.db"
-          S3_BUCKET    = aws_s3_bucket.jobs.bucket
+          APP_ENV   = "production"
+          S3_BUCKET = aws_s3_bucket.jobs.bucket
         }
         runtime_environment_secrets = {
-          JWT_SECRET = aws_ssm_parameter.jwt_secret.arn
+          JWT_SECRET   = aws_ssm_parameter.jwt_secret.arn
+          DATABASE_URL = aws_ssm_parameter.database_url.arn
         }
       }
     }
