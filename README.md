@@ -75,6 +75,20 @@ uv run pytest
 uv run ruff check .
 ```
 
+## Docker
+
+Day-to-day development uses the local server (`uv run uvicorn app.main:app --reload`). Docker is for verifying the production image and is what the CI/CD pipeline builds and pushes to ECR.
+
+```bash
+# Build
+docker build -t redactcat .
+
+# Run locally
+docker run --rm -p 8000:8000 --env-file .env redactcat
+```
+
+The CI/CD pipeline targets `linux/amd64` when pushing to ECR — no platform flag needed for local development.
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
