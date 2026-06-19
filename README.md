@@ -122,6 +122,8 @@ aws apprunner start-deployment \
 
 Merging to `main` triggers `.github/workflows/deploy.yml` automatically via OIDC — no AWS credentials stored in GitHub.
 
+**Database migrations** run automatically on container startup — `alembic upgrade head` executes before uvicorn accepts traffic. Multiple App Runner instances starting simultaneously are safe; Alembic uses a DB-level lock so only one applies pending migrations. For an existing database being brought under Alembic for the first time, run `alembic stamp head` to mark the current schema as already migrated without re-running it.
+
 **First-time infrastructure setup — set secrets after `terraform apply`:**
 
 `terraform apply` initializes SSM parameters with placeholder values. Before the app will start, set the real values:

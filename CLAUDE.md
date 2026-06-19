@@ -32,7 +32,18 @@ docker build -t redactcat .
 docker run --rm -p 8000:8000 --env-file .env redactcat
 ```
 
-**Dev database:** If models change, delete `redactcat.db` and restart — there are no migrations in development. Tests always use a fresh in-memory database. See open issues for the production database and Alembic migration roadmap.
+```bash
+# Apply all pending migrations (fresh local setup, or after model changes)
+uv run alembic upgrade head
+
+# Generate a new migration after editing models
+uv run alembic revision --autogenerate -m "description"
+
+# Roll back one migration
+uv run alembic downgrade -1
+```
+
+**Dev database:** After model changes, generate a migration and run `uv run alembic upgrade head`. For a clean local reset, delete `redactcat.db` and re-run `uv run alembic upgrade head`. Tests always use a fresh in-memory database and bypass migrations entirely.
 
 ## Architecture
 
