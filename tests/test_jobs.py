@@ -36,7 +36,7 @@ def test_create_text_job_returns_job_with_entities(client: TestClient) -> None:
         )
     assert response.status_code == 201
     data = response.json()
-    assert set(data.keys()) == {"id", "user_id", "input_text", "created_at", "entities"}
+    assert set(data.keys()) == {"id", "input_text", "created_at", "entities"}
     assert data["input_text"] == "John Doe lives here"
     assert len(data["entities"]) == 1
     entity = data["entities"][0]
