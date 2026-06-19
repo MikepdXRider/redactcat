@@ -75,9 +75,9 @@ uv run pytest
 uv run ruff check .
 ```
 
-## Docker
+## Running with Docker
 
-Day-to-day development uses the local server (`uv run uvicorn app.main:app --reload`). Docker is for verifying the production image and is what the CI/CD pipeline builds and pushes to ECR.
+Day-to-day development uses the local server (`uv run uvicorn app.main:app --reload`). Docker is for verifying the production image locally before deploying.
 
 ```bash
 # Build
@@ -88,6 +88,26 @@ docker run --rm -p 8000:8000 --env-file .env redactcat
 ```
 
 The CI/CD pipeline targets `linux/amd64` when pushing to ECR — no platform flag needed for local development.
+
+## Infrastructure & Deployment
+
+Infrastructure is managed with Terraform in `infra/`. All AWS resources (ECR, App Runner, S3, IAM, SSM, Route 53) are defined there. See [infra/architecture.drawio](infra/architecture.drawio) for a full resource diagram.
+
+**Deploying a new version** (manual):
+```bash
+docker build --platform linux/amd64 -t redactcat .
+docker tag redactcat:latest <ecr_url>:latest
+
+aws ecr get-login-password --region us-west-2 | \
+  docker login --username AWS --password-stdin <ecr_url>
+docker push <ecr_url>:latest
+
+aws apprunner start-deployment \
+  --service-arn <service_arn> \
+  --region us-west-2
+```
+
+Merging to `main` triggers `.github/workflows/deploy.yml` automatically via OIDC — no AWS credentials stored in GitHub.
 
 ## Environment Variables
 
@@ -130,6 +150,21 @@ redactcat/
 │   ├── test_auth.py       # Auth endpoint tests
 │   ├── test_health.py     # Health check test
 │   └── test_users.py      # User profile endpoint tests
+├── infra/
+│   ├── main.tf            # Provider + S3 backend
+│   ├── variables.tf       # region, app_name
+│   ├── outputs.tf         # ECR URL, App Runner URL, nameservers
+│   ├── ecr.tf             # ECR repository
+│   ├── s3.tf              # Job storage bucket
+│   ├── iam.tf             # App Runner roles + GitHub Actions OIDC
+│   ├── ssm.tf             # JWT_SECRET parameter
+│   ├── app_runner.tf      # App Runner service + custom domain
+│   ├── dns.tf             # Route 53 hosted zone + records
+│   └── architecture.drawio # AWS resource diagram
+├── .github/
+│   └── workflows/
+│       ├── ci.yml         # Lint + test on pull requests
+│       └── deploy.yml     # Build, push to ECR, deploy to App Runner on main
 ├── .env.example           # Environment variable template
 └── pyproject.toml         # Dependencies and tool config
 ```
