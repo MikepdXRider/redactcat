@@ -32,7 +32,7 @@ resource "aws_iam_role_policy" "github_actions" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
+        Action   = ["ecr:GetAuthorizationToken", "apprunner:ListServices"]
         Resource = "*"
       },
       {

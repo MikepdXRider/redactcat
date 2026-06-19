@@ -31,6 +31,13 @@ jobs:
 
       - name: Deploy to App Runner
         run: |
+          SERVICE_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='redactcat'].ServiceArn | [0]" \
+            --output text)
+          if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
+            echo "Error: App Runner service 'redactcat' not found"
+            exit 1
+          fi
           aws apprunner start-deployment \
-            --service-arn arn:aws:apprunner:us-west-2:234308273252:service/redactcat/4ff9fb90eed54c6591536960a8768442 \
+            --service-arn "$SERVICE_ARN" \
             --region us-west-2
