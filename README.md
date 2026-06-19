@@ -109,6 +109,21 @@ aws apprunner start-deployment \
 
 Merging to `main` triggers `.github/workflows/deploy.yml` automatically via OIDC — no AWS credentials stored in GitHub.
 
+**First-time infrastructure setup — set JWT_SECRET after `terraform apply`:**
+
+`terraform apply` initializes the SSM parameter with a placeholder value. Before the app will start, set the real secret:
+
+```bash
+aws ssm put-parameter \
+  --name /redactcat/JWT_SECRET \
+  --value "<your-secret>" \
+  --type SecureString \
+  --overwrite \
+  --region us-west-2
+```
+
+Subsequent `terraform apply` runs will not overwrite this value. Only required again if the infrastructure is fully destroyed and rebuilt.
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
