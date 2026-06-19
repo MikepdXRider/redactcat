@@ -11,3 +11,4 @@ dist/
 .claude/history.jsonl
 .claude/sessions
 .DS_Store
+claude-artifacts/
