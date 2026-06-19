@@ -29,7 +29,7 @@ class UserRead(BaseModel):
     created_at: datetime
 
 
-class TokenResponse(BaseModel):
+class TokenRead(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"

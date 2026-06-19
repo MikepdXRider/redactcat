@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import RefreshToken, User
-from app.schemas import RefreshRequest, TokenResponse, UserCreate, UserLogin
+from app.schemas import RefreshRequest, TokenRead, UserCreate, UserLogin
 
 router = APIRouter(tags=["auth"])
 
@@ -40,8 +40,8 @@ def store_refresh_token(user_id: int, db: Session) -> str:
     return token
 
 
-@router.post("/login", response_model=TokenResponse)
-def login(body: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
+@router.post("/login", response_model=TokenRead)
+def login(body: UserLogin, db: Session = Depends(get_db)) -> TokenRead:
     user = db.scalar(select(User).where(User.email == body.email))
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -49,7 +49,7 @@ def login(body: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
     refresh_token = store_refresh_token(user.id, db)
     db.commit()
 
-    return TokenResponse(
+    return TokenRead(
         access_token=create_access_token(user.id),
         refresh_token=refresh_token,
     )
@@ -75,8 +75,8 @@ def logout(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/refresh", response_model=TokenResponse)
-def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> TokenResponse:
+@router.post("/refresh", response_model=TokenRead)
+def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> TokenRead:
     now = datetime.now(UTC).replace(tzinfo=None)
     row = db.scalar(select(RefreshToken).where(RefreshToken.token == body.refresh_token))
     if not row or row.expires_at < now:
@@ -87,14 +87,14 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> TokenRespons
     new_refresh_token = store_refresh_token(user_id, db)
     db.commit()
 
-    return TokenResponse(
+    return TokenRead(
         access_token=create_access_token(user_id),
         refresh_token=new_refresh_token,
     )
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(body: UserCreate, db: Session = Depends(get_db)) -> TokenResponse:
+@router.post("/register", response_model=TokenRead, status_code=status.HTTP_201_CREATED)
+def register(body: UserCreate, db: Session = Depends(get_db)) -> TokenRead:
     if db.scalar(select(User).where(User.email == body.email)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
@@ -105,7 +105,7 @@ def register(body: UserCreate, db: Session = Depends(get_db)) -> TokenResponse:
     refresh_token = store_refresh_token(user.id, db)
     db.commit()
 
-    return TokenResponse(
+    return TokenRead(
         access_token=create_access_token(user.id),
         refresh_token=refresh_token,
     )
