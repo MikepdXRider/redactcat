@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import sessionmaker
 
 from app.database import get_db
@@ -16,9 +16,19 @@ def _alembic_config(db_url: str) -> Config:
     return cfg
 
 
+def _sqlite_engine(db_url: str):
+    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(conn, _):
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    return engine
+
+
 @contextmanager
 def _client(db_url: str, raise_server_exceptions: bool = True):
-    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    engine = _sqlite_engine(db_url)
     Session = sessionmaker(bind=engine)
 
     def override():
