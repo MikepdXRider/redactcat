@@ -1,6 +1,6 @@
 # redactcat
 
-A FastAPI service for redacting PII from documents. Users submit text, PDFs, or images; AWS Comprehend detects PII entities; users review and confirm suggested redactions; the service delivers a permanently redacted output. All job data is ephemeral — deleted after download.
+A FastAPI service for detecting and redacting PII from text. Users submit text; AWS Comprehend detects PII entities; users review and confirm redactions; the service returns a redacted string. Text passes through in-memory — no PII is stored at any point.
 
 ## Tech Stack
 
@@ -14,23 +14,20 @@ A FastAPI service for redacting PII from documents. Users submit text, PDFs, or 
 | Linting | Ruff | Single tool replaces flake8, isort, and pyupgrade |
 | Testing | pytest + SQLite in-memory | Fast, fully isolated, no external services required for CI |
 | PII detection | AWS Comprehend | Managed NLP; sync API handles up to 100KB inline with no infrastructure to maintain |
-| File extraction | PyMuPDF + Textract | PyMuPDF for text-native PDFs; Textract for scanned PDFs and images |
-| Redaction | PyMuPDF | `add_redact_annot` + `apply_redactions` produces permanent, non-reversible redaction |
-| File storage | S3 (ephemeral) | Files deleted immediately after download; presigned URLs for secure delivery |
 
 ## Architecture Decisions
 
 **Stateless JWT + rotating refresh tokens**
 Access tokens are short-lived JWTs (30min) with no server-side storage. Refresh tokens are opaque strings stored in the `refresh_tokens` table. Each `/auth/refresh` call rotates the pair — the old row is deleted and a new token pair is issued. Logout is a single DB delete. This avoids a token blacklist while giving stolen refresh tokens only a one-use window before detection.
 
+**Stateless text scan and redact**
+Text passes through in-memory — no PII is written to the database or S3 at any point. `/text/scan` returns the source text alongside detected entities; the client can POST that response body directly to `/text/redact` after filtering. The client controls which entities to redact (by confidence threshold, entity type, etc.) and can produce multiple redacted variants from a single scan. PDF support will introduce a stateful flow (`/pdf/*`) with S3 ephemeral storage when implemented.
+
 **Naive UTC datetimes**
 All datetimes are computed in UTC and stored timezone-naive (`datetime.now(UTC).replace(tzinfo=None)`). SQLite has no native timezone support; PostgreSQL `TIMESTAMP WITHOUT TIME ZONE` accepts naive values. The UTC convention is enforced at the application layer — no mixed-offset data enters the DB.
 
 **Cross-user isolation via 404**
 Endpoints that access user-owned resources raise `404` (not `403`) when a resource exists but belongs to another user. This avoids confirming resource existence to unauthorized callers.
-
-**Ephemeral job storage**
-Job files are deleted from S3 immediately after the user downloads the redacted output. The only persistent record is a `UsageEvent` row with aggregate stats (no PII). This limits data retention exposure and eliminates a class of compliance risk.
 
 **Neon PostgreSQL in production, SQLite locally**
 The deployed service connects to [Neon](https://neon.tech) — serverless PostgreSQL. The connection string is stored in SSM Parameter Store and injected into App Runner at runtime. Local development uses SQLite (`DATABASE_URL` defaults to `sqlite:///./redactcat.db`) for zero-config setup. All datetime and schema decisions are PostgreSQL-compatible; migrating to RDS is a connection string change if Neon's constraints (no VPC placement, scale-to-zero cold starts) become a problem.
@@ -53,11 +50,24 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | GET | /users/me | ✓ | Get current user profile |
 | PATCH | /users/me | ✓ | Update email or password |
 | DELETE | /users/me | ✓ | Delete account and all active sessions |
-| POST | /jobs/text | ✓ | Submit text; runs Comprehend PII detection; returns job + entities |
-| GET | /jobs/{id}/entities | ✓ | Re-fetch detected entities for a job |
-| POST | /jobs/{id}/redact | ✓ | Confirm entity IDs to redact; returns redacted text; deletes job |
+| POST | /text/scan | ✓ | Detect PII entities in text; returns source text + entity list |
+| POST | /text/redact | ✓ | Apply redactions to text; returns redacted string |
 
 Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
+
+### Text workflow
+
+```
+POST /text/scan
+Body:    { "text": "My name is John Doe and my SSN is 123-45-6789" }
+Returns: { "text": "...", "entities": [{ "entity_type", "text", "start_offset", "end_offset", "confidence" }] }
+
+POST /text/redact
+Body:    { "text": "...", "entities": [...], "replacement": "[REDACTED]" }
+Returns: { "redacted_text": "My name is [REDACTED] and my SSN is [REDACTED]" }
+```
+
+The scan response can be posted directly to redact — filter the `entities` array first to select which PII to redact. `replacement` is optional and defaults to `"[REDACTED]"`; pass an empty string to delete PII rather than substitute it.
 
 ## Quickstart
 
@@ -145,9 +155,8 @@ Subsequent `terraform apply` runs will not overwrite these values. Only required
 | `JWT_EXPIRE_MINUTES` | No | `30` | Access token lifetime in minutes |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `30` | Refresh token lifetime in days |
 | `AWS_PROFILE` | Yes† | — | Named AWS profile from `~/.aws/credentials`; provides credentials and region |
-| `S3_BUCKET` | Yes† | — | S3 bucket for ephemeral job file storage |
 
-†Required for job features (Comprehend, Textract, S3). Auth endpoints run locally without AWS credentials.
+†Required for text scan/redact (Comprehend). Auth and user endpoints run without AWS credentials.
 
 ## Project Structure
 
@@ -160,47 +169,34 @@ redactcat/
 │   ├── main.py            # FastAPI app entry point — registers routers
 │   ├── models.py          # All SQLAlchemy ORM models
 │   ├── schemas.py         # All Pydantic request/response schemas
-│   ├── routers/           # Feature routers — one file per domain
+│   ├── routers/
 │   │   ├── auth.py        # Register, login, logout, token refresh
 │   │   ├── health.py      # Health check
+│   │   ├── text.py        # PII scan and redaction (stateless)
 │   │   └── users.py       # User profile (get, update, delete)
-│   └── services/          # Business logic and AWS integrations
-│       ├── cleanup.py     # Post-download job deletion
+│   └── services/
 │       ├── detection.py   # AWS Comprehend PII detection
-│       ├── extraction.py  # Text extraction (PyMuPDF, Textract)
-│       ├── redaction.py   # Apply redactions (PyMuPDF / string substitution)
-│       └── storage.py     # S3 upload/download/delete
+│       └── redaction.py   # Text redaction (string substitution)
 ├── tests/
 │   ├── conftest.py        # Fixtures: engine, db session, TestClient
 │   ├── test_auth.py       # Auth endpoint tests
+│   ├── test_detection.py  # Comprehend service unit tests (botocore Stubber)
 │   ├── test_health.py     # Health check test
+│   ├── test_text.py       # /text/scan and /text/redact endpoint tests
 │   └── test_users.py      # User profile endpoint tests
-├── infra/
-│   ├── main.tf            # Provider + S3 backend
-│   ├── variables.tf       # region, app_name
-│   ├── outputs.tf         # ECR URL, App Runner URL, nameservers
-│   ├── ecr.tf             # ECR repository
-│   ├── s3.tf              # Job storage bucket
-│   ├── iam.tf             # App Runner roles + GitHub Actions OIDC
-│   ├── ssm.tf             # JWT_SECRET parameter
-│   ├── app_runner.tf      # App Runner service + custom domain
-│   ├── dns.tf             # Route 53 hosted zone + records
-│   └── architecture.drawio # AWS resource diagram
-├── .github/
-│   └── workflows/
-│       ├── ci.yml         # Lint + test on pull requests
-│       └── deploy.yml     # Build, push to ECR, deploy to App Runner on main
+├── infra/                 # Terraform — ECR, App Runner, S3, IAM, SSM, Route 53
+├── .github/workflows/
+│   ├── ci.yml             # Lint + test on pull requests
+│   └── deploy.yml         # Build, push to ECR, deploy to App Runner on main
 ├── .env.example           # Environment variable template
 └── pyproject.toml         # Dependencies and tool config
 ```
 
 ## How It Works
 
-1. **Submit** — user POSTs text or uploads a file (PDF, image)
-2. **Detect** — AWS Comprehend scans for PII entities; Textract extracts text from scanned files
-3. **Review** — API returns detected entities with locations for user confirmation
-4. **Redact** — user submits confirmed entity IDs; service applies permanent redactions via PyMuPDF
-5. **Deliver** — user downloads the redacted output; all job data and S3 objects are deleted
+1. **Scan** — user POSTs text to `/text/scan`; AWS Comprehend detects PII entities and returns them with character offsets and confidence scores
+2. **Review** — client filters the entity list (by type, confidence, or any other criteria)
+3. **Redact** — user POSTs the original text and selected entities to `/text/redact`; service applies substitutions and returns the redacted string
 
 See `CLAUDE.md` for contributor conventions.
 

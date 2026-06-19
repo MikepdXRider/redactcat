@@ -45,15 +45,11 @@ class UserUpdate(BaseModel):
     new_password: str | None = Field(default=None, min_length=PASSWORD_MIN_LENGTH)
 
 
-class JobCreate(BaseModel):
+class TextScanRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
 
 
-class EntityRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    job_id: int
+class DetectedEntity(BaseModel):
     entity_type: str
     text: str
     start_offset: int
@@ -61,20 +57,16 @@ class EntityRead(BaseModel):
     confidence: float
 
 
-class JobRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    input_text: str
-    created_at: datetime
-    entities: list[EntityRead]
+class TextScanRead(BaseModel):
+    text: str
+    entities: list[DetectedEntity]
 
 
-class RedactionSubmit(BaseModel):
-    entity_ids: list[int]
+class TextRedactRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    entities: list[DetectedEntity]
+    replacement: str = "[REDACTED]"
 
 
-class RedactionResult(BaseModel):
+class TextRedactRead(BaseModel):
     redacted_text: str
-
-

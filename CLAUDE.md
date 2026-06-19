@@ -48,11 +48,8 @@ app/
   schemas.py         # All Pydantic request/response schemas
   routers/           # Feature routers — one file per domain
   services/          # Business logic and external integrations
-    detection.py     # AWS Comprehend PII detection
-    extraction.py    # Text extraction from PDFs and images (Textract)
-    redaction.py     # Apply redactions (PyMuPDF for files, substitution for text)
-    storage.py       # S3 upload/download/delete helpers
-    cleanup.py       # Post-download job and file deletion
+    detection.py     # AWS Comprehend PII detection → list[DetectedEntity]
+    redaction.py     # Text redaction (string substitution, in-memory)
 ```
 
 ### Adding Feature Modules
@@ -67,10 +64,11 @@ All SQLAlchemy ORM models live in a single file. They share `Base` from `app/dat
 
 All Pydantic schemas live in a single file. Naming conventions:
 - `XRead` — response DTOs (returned from endpoints)
-- `XCreate` — request body schemas (accepted by endpoints)
+- `XCreate` — request body schemas for operations that create a DB record
+- `XRequest` — request body schemas for stateless operations (no record created)
 - `XUpdate` — partial update schemas (all fields optional)
 - `XLogin` — auth input schemas; intentionally omit validation constraints (e.g. no `min_length` on password) so wrong credentials always return 401, never 422
-- All schemas use `ConfigDict(from_attributes=True)` to read from ORM objects
+- Only schemas that read from ORM objects use `ConfigDict(from_attributes=True)`; stateless schemas omit it
 
 Shared validation values that appear in multiple schemas (e.g. password length) must be defined as a module-level constant and referenced by name — not repeated inline:
 
@@ -104,28 +102,36 @@ JWT tokens are signed with the `JWT_SECRET` env var using HS256. `JWT_SECRET` is
 
 ### Cross-User Isolation
 
-Every endpoint that accesses a job or resource must verify ownership before returning data or performing actions. Raise `404` (not `403`) when a resource belongs to another user — do not confirm its existence.
+Every endpoint that accesses a stored resource must verify ownership before returning data or performing actions. Raise `404` (not `403`) when a resource belongs to another user — do not confirm its existence.
 
 ```python
-job = db.get(Job, job_id)
-if not job or job.user_id != current_user.id:
+record = db.get(Model, record_id)
+if not record or record.user_id != current_user.id:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 ```
 
-### Job Lifecycle
+Stateless endpoints (`/text/*`) have no stored resources and require no ownership check.
 
-Text jobs: created with entities → user reviews → redacted output returned → job deleted.
+### Text Flow (Stateless)
 
-File jobs (not yet implemented) will introduce async processing stages and a `status` column. Status is intentionally omitted until there is an observable intermediate state that clients need to act on.
+Text passes through in-memory — no PII is written to the database or S3 at any point.
 
-### Ephemeral Storage (S3)
+1. `POST /text/scan` — calls Comprehend, returns `{ text, entities[] }`
+2. Client filters entities (by type, confidence, etc.)
+3. `POST /text/redact` — applies substitutions, returns `{ redacted_text }`
 
-Job files are not retained after the user downloads the redacted output. On download:
+The scan response shape matches the redact request body exactly, so the client can POST the scan response directly to redact without reshaping. `replacement` defaults to `"[REDACTED]"`; empty string deletes PII.
+
+PDF support will be a separate stateful flow (`/pdf/*`) with S3 ephemeral storage when implemented.
+
+### Ephemeral Storage (S3) — Future PDF Flow
+
+PDF files will not be retained after the user downloads the redacted output. On download:
 1. Generate a short-TTL presigned S3 URL for the redacted file
 2. Delete original and redacted S3 objects
-3. Delete all DB rows for the job except the `UsageEvent`
+3. Delete all DB rows for the job
 
-The `UsageEvent` row is the only persistent record of a job. It records aggregate stats (file type, entity count) for analytics — no PII content.
+This section will be expanded when the PDF flow is implemented.
 
 ### Database Sessions
 
@@ -176,7 +182,7 @@ Before writing tests for any new endpoint, invoke the `api-testing` skill (`/api
 When adding tests for endpoints that call AWS services, mock at the service-function level using `unittest.mock.patch`. Add the specific patch targets here as each service is built.
 
 Current patch targets:
-- `app.routers.jobs.detect_pii_entities` — mock in `tests/test_jobs.py` to control Comprehend output without a real AWS call
+- `app.routers.text.detect_pii_entities` — mock in `tests/test_text.py` to control Comprehend output without a real AWS call
 
 To test a service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 

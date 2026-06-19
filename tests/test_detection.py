@@ -23,7 +23,7 @@ def test_detect_pii_entities_maps_response() -> None:
             {"Text": text, "LanguageCode": "en"},
         )
         with patch("app.services.detection.boto3.client", return_value=client):
-            entities = detect_pii_entities(text, job_id=1)
+            entities = detect_pii_entities(text)
 
     assert len(entities) == 1
     assert entities[0].entity_type == "NAME"
@@ -31,7 +31,6 @@ def test_detect_pii_entities_maps_response() -> None:
     assert entities[0].start_offset == 0
     assert entities[0].end_offset == 8
     assert entities[0].confidence == 0.99
-    assert entities[0].job_id == 1
 
 
 def test_detect_pii_entities_empty_response() -> None:
@@ -44,7 +43,7 @@ def test_detect_pii_entities_empty_response() -> None:
             {"Text": text, "LanguageCode": "en"},
         )
         with patch("app.services.detection.boto3.client", return_value=client):
-            entities = detect_pii_entities(text, job_id=1)
+            entities = detect_pii_entities(text)
 
     assert entities == []
 
@@ -64,11 +63,10 @@ def test_detect_pii_entities_multiple_types() -> None:
             {"Text": text, "LanguageCode": "en"},
         )
         with patch("app.services.detection.boto3.client", return_value=client):
-            entities = detect_pii_entities(text, job_id=2)
+            entities = detect_pii_entities(text)
 
     assert len(entities) == 2
     assert entities[0].entity_type == "NAME"
     assert entities[0].text == "Jane Smith"
     assert entities[1].entity_type == "SSN"
     assert entities[1].text == "123-45-6789"
-    assert all(e.job_id == 2 for e in entities)
