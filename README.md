@@ -32,8 +32,8 @@ Endpoints that access user-owned resources raise `404` (not `403`) when a resour
 **Ephemeral job storage**
 Job files are deleted from S3 immediately after the user downloads the redacted output. The only persistent record is a `UsageEvent` row with aggregate stats (no PII). This limits data retention exposure and eliminates a class of compliance risk.
 
-**SQLite for MVP, RDS PostgreSQL for production**
-The deployed service currently uses SQLite running in the App Runner container filesystem. SQLite is not durable across deployments — this is an intentional MVP tradeoff that keeps infrastructure simple while the API surface stabilizes. Migration to a managed PostgreSQL database is tracked and will happen before the service handles real users. All datetime and schema decisions are made with PostgreSQL compatibility in mind.
+**Neon PostgreSQL in production, SQLite locally**
+The deployed service connects to [Neon](https://neon.tech) — serverless PostgreSQL. The connection string is stored in SSM Parameter Store and injected into App Runner at runtime. Local development uses SQLite (`DATABASE_URL` defaults to `sqlite:///./redactcat.db`) for zero-config setup. All datetime and schema decisions are PostgreSQL-compatible; migrating to RDS is a connection string change if Neon's constraints (no VPC placement, scale-to-zero cold starts) become a problem.
 
 **Single `models.py` and `schemas.py`**
 All ORM models and Pydantic schemas live in one file each. This avoids circular imports, makes the full data model visible at a glance, and keeps `Base.metadata.create_all` deterministic.
@@ -112,20 +112,27 @@ aws apprunner start-deployment \
 
 Merging to `main` triggers `.github/workflows/deploy.yml` automatically via OIDC — no AWS credentials stored in GitHub.
 
-**First-time infrastructure setup — set JWT_SECRET after `terraform apply`:**
+**First-time infrastructure setup — set secrets after `terraform apply`:**
 
-`terraform apply` initializes the SSM parameter with a placeholder value. Before the app will start, set the real secret:
+`terraform apply` initializes SSM parameters with placeholder values. Before the app will start, set the real values:
 
 ```bash
 aws ssm put-parameter \
-  --name /redactcat/JWT_SECRET \
+  --name "/redactcat/JWT_SECRET" \
   --value "<your-secret>" \
+  --type SecureString \
+  --overwrite \
+  --region us-west-2
+
+aws ssm put-parameter \
+  --name "/redactcat/DATABASE_URL" \
+  --value "postgresql://<user>:<password>@<host>/<db>?sslmode=require" \
   --type SecureString \
   --overwrite \
   --region us-west-2
 ```
 
-Subsequent `terraform apply` runs will not overwrite this value. Only required again if the infrastructure is fully destroyed and rebuilt.
+Subsequent `terraform apply` runs will not overwrite these values. Only required again if the infrastructure is fully destroyed and rebuilt.
 
 ## Environment Variables
 
