@@ -18,17 +18,13 @@ after user approval. Never create an issue without showing the full draft first.
 
 If no argument is provided, ask the user what the issue is about before proceeding.
 
----
-
 ## Step 1 — Classify the issue type
 
 Pick the template that fits:
 
-- **Problem/gap** — something is missing, wrong, or needs improvement. Use when the right solution isn't obvious. Forces options and tradeoffs before committing to an approach. Default when unsure.
+- **Problem/gap** — solution not yet decided; forces options before approach is committed. **Default.**
 - **Feature spec** — a planned feature with scope and deliverables already decided. Use only when the approach is clear.
 - **Bug** — observable incorrect behavior with reproduction steps.
-
----
 
 ## Step 2 — Draft the title
 
@@ -70,8 +66,6 @@ Format: `type(scope): imperative description`
 - `chore(infra): add default tags to all Terraform resources`
 - `ci: add deployment health check to deploy workflow`
 - `refactor(jobs): extract entity filtering into service layer`
-
----
 
 ## Step 3 — Draft the body
 
@@ -143,8 +137,6 @@ Use only when scope and deliverables are already decided.
 [Relevant versions, config, or context needed to reproduce.]
 ```
 
----
-
 ## Step 4 — Select labels
 
 Apply exactly **one type label** and **one priority label**. Add `blocked`
@@ -165,7 +157,9 @@ and if so, note it explicitly at the top of the body:
 | Nice to have, no immediate urgency     | `p:low`    |
 | Waiting on another issue               | `blocked`  |
 
----
+## Step 4.5 — Check for duplicates
+
+Run `gh issue list --repo MikepdXRider/redactcat --state open` and scan titles for a similar existing issue. If one exists, tell the user and ask whether to proceed with a new issue or update the existing one.
 
 ## Step 5 — Show draft and wait for approval
 
