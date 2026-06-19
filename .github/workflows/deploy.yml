@@ -1,0 +1,36 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::234308273252:role/redactcat-github-actions
+          aws-region: us-west-2
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        run: |
+          docker build --platform linux/amd64 -t redactcat .
+          docker tag redactcat:latest 234308273252.dkr.ecr.us-west-2.amazonaws.com/redactcat:latest
+          docker push 234308273252.dkr.ecr.us-west-2.amazonaws.com/redactcat:latest
+
+      - name: Deploy to App Runner
+        run: |
+          aws apprunner start-deployment \
+            --service-arn arn:aws:apprunner:us-west-2:234308273252:service/redactcat/4ff9fb90eed54c6591536960a8768442 \
+            --region us-west-2

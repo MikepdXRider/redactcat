@@ -1,0 +1,147 @@
+<mxfile host="app.diagrams.net" modified="2026-06-18" version="21.0.0">
+  <diagram name="redactcat AWS Infrastructure" id="redactcat-infra">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- AWS Cloud boundary -->
+        <mxCell id="aws" value="AWS Cloud (us-west-2)" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#f0f8ff;strokeColor=#232F3E;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="210" y="20" width="1380" height="1010" as="geometry" />
+        </mxCell>
+
+        <!-- IAM group background -->
+        <mxCell id="iam-bg" value="IAM" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#d6b656;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="230" y="680" width="1330" height="290" as="geometry" />
+        </mxCell>
+
+        <!-- ======== EXTERNAL ENTITIES ======== -->
+
+        <mxCell id="porkbun" value="Porkbun&#xa;(Domain Registrar)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#555555;fontColor=#333333;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="60" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="client" value="Client&#xa;(Browser / API Consumer)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#555555;fontColor=#333333;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="300" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ======== AWS SERVICES ======== -->
+
+        <mxCell id="r53" value="Route 53&#xa;redactcat.com hosted zone" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="80" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ecr" value="ECR&#xa;redactcat&#xa;scan_on_push · keep last 5 images" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="70" width="210" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="apprunner" value="App Runner&#xa;redactcat&#xa;256 vCPU · 512 MB · SQLite · port 8000" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ff9900;strokeColor=#d79b00;fontColor=#000000;fontSize=13;fontStyle=1;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="560" y="270" width="250" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="comprehend" value="AWS Comprehend&#xa;DetectPiiEntities" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="230" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ssm" value="SSM Parameter Store&#xa;/redactcat/JWT_SECRET&#xa;SecureString · KMS encrypted" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="390" width="210" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3" value="S3&#xa;redactcat-jobs-{account_id}&#xa;AES-256 · public access blocked · 1-day lifecycle" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="490" width="250" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ======== IAM RESOURCES ======== -->
+
+        <mxCell id="ecr-role" value="Role: redactcat-apprunner-ecr-access&#xa;Trust: build.apprunner.amazonaws.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="270" y="730" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ecr-policy" value="AWS Managed Policy&#xa;AWSAppRunnerServicePolicyForECRAccess" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="270" y="840" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="inst-role" value="Role: redactcat-apprunner-instance&#xa;Trust: tasks.apprunner.amazonaws.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="730" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="inst-policy" value="Inline Policy: redactcat-apprunner-permissions&#xa;· comprehend:DetectPiiEntities  Resource: *&#xa;· s3:GetObject / PutObject / DeleteObject  Resource: bucket/*&#xa;· ssm:GetParameter  Resource: JWT_SECRET arn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="840" width="360" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ======== EDGES ======== -->
+
+        <!-- Porkbun → Route 53: NS delegation -->
+        <mxCell id="e-ns" value="NS delegation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=1;endArrow=open;endFill=0;fontSize=11;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="porkbun" target="r53" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Client → Route 53: DNS lookup -->
+        <mxCell id="e-dns" value="DNS lookup" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=0;fontSize=11;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.9;entryDx=0;entryDy=0;" edge="1" source="client" target="r53" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="200" y="318" />
+              <mxPoint x="200" y="144" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Client → App Runner: HTTPS requests -->
+        <mxCell id="e-https" value="HTTPS requests" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;fontSize=11;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="client" target="apprunner" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Route 53 → App Runner: custom domain association -->
+        <mxCell id="e-domain" value="custom domain → service URL&#xa;(aws_apprunner_custom_domain_association)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=1;endArrow=open;endFill=0;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" source="r53" target="apprunner" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- App Runner → ECR: pull image -->
+        <mxCell id="e-ecr" value="pull :latest" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;fontSize=11;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;" edge="1" source="apprunner" target="ecr" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- App Runner → Comprehend -->
+        <mxCell id="e-comp" value="DetectPiiEntities" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;fontSize=11;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="apprunner" target="comprehend" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- App Runner → SSM -->
+        <mxCell id="e-ssm" value="GetParameter (startup)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;fontSize=11;exitX=1;exitY=0.8;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="apprunner" target="ssm" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- App Runner → S3 -->
+        <mxCell id="e-s3" value="Get / Put / Delete job files" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;fontSize=11;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="apprunner" target="s3" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- App Runner → ECR Access Role (image pull role) -->
+        <mxCell id="e-ecr-role" value="image pull role" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=1;endArrow=open;endFill=0;fontSize=10;strokeColor=#d6b656;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="apprunner" target="ecr-role" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- App Runner → Instance Role -->
+        <mxCell id="e-inst-role" value="instance role" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=1;endArrow=open;endFill=0;fontSize=10;strokeColor=#d6b656;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="apprunner" target="inst-role" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Managed Policy → ECR Access Role: attached -->
+        <mxCell id="e-ecr-pol-role" value="attached to" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=1;endArrow=open;endFill=0;fontSize=10;strokeColor=#d6b656;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" source="ecr-policy" target="ecr-role" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Inline Policy → Instance Role: attached -->
+        <mxCell id="e-inst-pol-role" value="attached to" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=1;endArrow=open;endFill=0;fontSize=10;strokeColor=#d6b656;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" source="inst-policy" target="inst-role" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ECR Access Role → ECR: grants pull access -->
+        <mxCell id="e-role-ecr" value="grants ECR pull" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;dashed=1;endArrow=open;endFill=0;fontSize=10;strokeColor=#d6b656;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" source="ecr-role" target="ecr" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
