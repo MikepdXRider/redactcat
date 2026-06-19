@@ -41,6 +41,9 @@ uv run alembic revision --autogenerate -m "description"
 
 # Roll back one migration
 uv run alembic downgrade -1
+
+# Roll back ALL migrations (empty DB)
+uv run alembic downgrade base
 ```
 
 **Dev database:** After model changes, generate a migration and run `uv run alembic upgrade head`. For a clean local reset, delete `redactcat.db` and re-run `uv run alembic upgrade head`. Tests always use a fresh in-memory database and bypass migrations entirely.
@@ -148,6 +151,16 @@ PDF files will not be retained after the user downloads the redacted output. On 
 3. Delete all DB rows for the job
 
 This section will be expanded when the PDF flow is implemented.
+
+### SQLite FK Enforcement
+
+All SQLite engine instances must have `PRAGMA foreign_keys=ON` applied via a SQLAlchemy event listener so FK constraints and cascades match PostgreSQL in production. The pattern is established in `app/database.py` (dev server) and `tests/conftest.py` (test suite). Any new SQLite engine — test helpers, migration tests, scripts — must follow the same pattern:
+
+```python
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(conn, _):
+    conn.execute("PRAGMA foreign_keys=ON")
+```
 
 ### Database Sessions
 
