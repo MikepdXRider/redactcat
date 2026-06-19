@@ -78,3 +78,32 @@ class RedactionResult(BaseModel):
     redacted_text: str
 
 
+class TextScanRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class DetectedEntity(BaseModel):
+    entity_type: str
+    text: str
+    start_offset: int
+    end_offset: int
+    confidence: float
+
+
+class TextScanRead(BaseModel):
+    entities: list[DetectedEntity]
+
+
+class EntitySelection(BaseModel):
+    start_offset: int
+    end_offset: int
+
+
+class TextRedactRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    entities: list[EntitySelection]
+
+
+class TextRedactRead(BaseModel):
+    redacted_text: str
+
