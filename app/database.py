@@ -1,7 +1,8 @@
-# SQLAlchemy engine, session factory, and declarative Base. `get_db` is injected into
-# route handlers via FastAPI's Depends() to provide a per-request Session. Schema is
-# managed by Alembic migrations — not create_all.
+"""SQLAlchemy engine, session factory, and declarative Base.
 
+`get_db` is injected into route handlers via FastAPI's Depends() to provide a
+per-request Session. Schema is managed by Alembic migrations — not create_all.
+"""
 
 from collections.abc import Generator
 

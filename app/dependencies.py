@@ -1,7 +1,9 @@
-# Shared FastAPI dependencies. `get_current_user` validates the Bearer JWT, resolves
-# the User row, and raises 401 on any failure — any route that declares it as a
-# Depends() is automatically protected.
+"""Shared FastAPI dependencies.
 
+`get_current_user` validates the Bearer JWT, resolves the User row, and raises
+401 on any failure — any route that declares it as a Depends() is automatically
+protected.
+"""
 
 import jwt
 from fastapi import Depends, HTTPException, status

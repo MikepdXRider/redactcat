@@ -1,8 +1,10 @@
-# Text router. Stateless PII scan and redact — no text is written to the DB or S3.
-# /scan calls Comprehend and returns detected entities; /redact applies substitutions.
-# The scan response shape matches the redact request body so the client can POST it
-# directly, controlling which entities to act on.
+"""Text router.
 
+Stateless PII scan and redact — no text is written to the DB or S3. /scan calls
+Comprehend and returns detected entities; /redact applies substitutions. The scan
+response shape matches the redact request body so the client can POST it directly,
+controlling which entities to act on.
+"""
 
 from fastapi import APIRouter, Depends, status
 

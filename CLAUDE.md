@@ -210,6 +210,21 @@ To test a service function in isolation (e.g., verifying the Comprehend call sha
 - No dead code, commented-out blocks, or unresolved TODOs in final output
 - Every function should do one thing and be nameable in plain English
 
+### Module docstrings
+
+Every Python module in `app/` and `alembic/` must have a top-level docstring explaining why the file exists, how it connects to the rest of the app, and any design decisions embedded in it. Use PEP 257 multi-line format — summary line, blank line, body, closing `"""` on its own line:
+
+```python
+"""Auth router.
+
+Stateless JWTs (30min access token) paired with rotating opaque refresh tokens
+stored in the DB. Each /refresh call replaces the old token row; /logout deletes
+it. The access token expires naturally — no blacklist needed.
+"""
+```
+
+Test files do not need docstrings — the filename is sufficient.
+
 ## Linting Hook
 
 A `PostToolUse` hook in `.claude/settings.json` runs ruff automatically after every `Write`, `Edit`, or `MultiEdit` on a `.py` file. It auto-fixes what it can, then blocks if unfixable issues remain (undefined names, syntax errors).

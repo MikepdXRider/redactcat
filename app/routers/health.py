@@ -1,6 +1,8 @@
-# Health-check router. Returns {"status": "ok"} — used by App Runner to verify the
-# container is accepting traffic after deployment.
+"""Health-check router.
 
+Returns {"status": "ok"} — used by App Runner to verify the container is
+accepting traffic after deployment.
+"""
 
 from fastapi import APIRouter
 

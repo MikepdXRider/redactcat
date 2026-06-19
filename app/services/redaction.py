@@ -1,6 +1,8 @@
-# Text redaction service. Substitutes entity spans right-to-left so earlier character
-# offsets remain valid after each replacement. Operates entirely in memory — no I/O.
+"""Text redaction service.
 
+Substitutes entity spans right-to-left so earlier character offsets remain valid
+after each replacement. Operates entirely in memory — no I/O.
+"""
 
 from app.schemas import DetectedEntity
 

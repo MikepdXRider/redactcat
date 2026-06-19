@@ -1,7 +1,9 @@
-# SQLAlchemy ORM models. All models inherit from Base (app/database.py) and are
-# imported by alembic/env.py so Alembic can autogenerate migrations when they change.
-# Add new models here; never define them inside router or service files.
+"""SQLAlchemy ORM models.
 
+All models inherit from Base (app/database.py) and are imported by alembic/env.py
+so Alembic can autogenerate migrations when they change. Add new models here;
+never define them inside router or service files.
+"""
 
 from datetime import UTC, datetime
 
