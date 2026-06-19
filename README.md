@@ -1,6 +1,6 @@
 # redactcat
 
-A production-grade FastAPI service for redacting PII from documents. Users submit text, PDFs, or images; AWS Comprehend detects PII entities; users review and confirm suggested redactions; the service delivers a permanently redacted output. All job data is ephemeral — deleted after download.
+A FastAPI service for redacting PII from documents. Users submit text, PDFs, or images; AWS Comprehend detects PII entities; users review and confirm suggested redactions; the service delivers a permanently redacted output. All job data is ephemeral — deleted after download.
 
 ## Tech Stack
 
@@ -31,6 +31,9 @@ Endpoints that access user-owned resources raise `404` (not `403`) when a resour
 
 **Ephemeral job storage**
 Job files are deleted from S3 immediately after the user downloads the redacted output. The only persistent record is a `UsageEvent` row with aggregate stats (no PII). This limits data retention exposure and eliminates a class of compliance risk.
+
+**Neon PostgreSQL in production, SQLite locally**
+The deployed service connects to [Neon](https://neon.tech) — serverless PostgreSQL. The connection string is stored in SSM Parameter Store and injected into App Runner at runtime. Local development uses SQLite (`DATABASE_URL` defaults to `sqlite:///./redactcat.db`) for zero-config setup. All datetime and schema decisions are PostgreSQL-compatible; migrating to RDS is a connection string change if Neon's constraints (no VPC placement, scale-to-zero cold starts) become a problem.
 
 **Single `models.py` and `schemas.py`**
 All ORM models and Pydantic schemas live in one file each. This avoids circular imports, makes the full data model visible at a glance, and keeps `Base.metadata.create_all` deterministic.
@@ -75,9 +78,9 @@ uv run pytest
 uv run ruff check .
 ```
 
-## Docker
+## Running with Docker
 
-Day-to-day development uses the local server (`uv run uvicorn app.main:app --reload`). Docker is for verifying the production image and is what the CI/CD pipeline builds and pushes to ECR.
+Day-to-day development uses the local server (`uv run uvicorn app.main:app --reload`). Docker is for verifying the production image locally before deploying.
 
 ```bash
 # Build
@@ -88,6 +91,48 @@ docker run --rm -p 8000:8000 --env-file .env redactcat
 ```
 
 The CI/CD pipeline targets `linux/amd64` when pushing to ECR — no platform flag needed for local development.
+
+## Infrastructure & Deployment
+
+Infrastructure is managed with Terraform in `infra/`. All AWS resources (ECR, App Runner, S3, IAM, SSM, Route 53) are defined there. See [infra/architecture.drawio](infra/architecture.drawio) for a full resource diagram.
+
+**Deploying a new version** (manual):
+```bash
+docker build --platform linux/amd64 -t redactcat .
+docker tag redactcat:latest <ecr_url>:latest
+
+aws ecr get-login-password --region us-west-2 | \
+  docker login --username AWS --password-stdin <ecr_url>
+docker push <ecr_url>:latest
+
+aws apprunner start-deployment \
+  --service-arn <service_arn> \
+  --region us-west-2
+```
+
+Merging to `main` triggers `.github/workflows/deploy.yml` automatically via OIDC — no AWS credentials stored in GitHub.
+
+**First-time infrastructure setup — set secrets after `terraform apply`:**
+
+`terraform apply` initializes SSM parameters with placeholder values. Before the app will start, set the real values:
+
+```bash
+aws ssm put-parameter \
+  --name "/redactcat/JWT_SECRET" \
+  --value "<your-secret>" \
+  --type SecureString \
+  --overwrite \
+  --region us-west-2
+
+aws ssm put-parameter \
+  --name "/redactcat/DATABASE_URL" \
+  --value "postgresql://<user>:<password>@<host>/<db>?sslmode=require" \
+  --type SecureString \
+  --overwrite \
+  --region us-west-2
+```
+
+Subsequent `terraform apply` runs will not overwrite these values. Only required again if the infrastructure is fully destroyed and rebuilt.
 
 ## Environment Variables
 
@@ -130,6 +175,21 @@ redactcat/
 │   ├── test_auth.py       # Auth endpoint tests
 │   ├── test_health.py     # Health check test
 │   └── test_users.py      # User profile endpoint tests
+├── infra/
+│   ├── main.tf            # Provider + S3 backend
+│   ├── variables.tf       # region, app_name
+│   ├── outputs.tf         # ECR URL, App Runner URL, nameservers
+│   ├── ecr.tf             # ECR repository
+│   ├── s3.tf              # Job storage bucket
+│   ├── iam.tf             # App Runner roles + GitHub Actions OIDC
+│   ├── ssm.tf             # JWT_SECRET parameter
+│   ├── app_runner.tf      # App Runner service + custom domain
+│   ├── dns.tf             # Route 53 hosted zone + records
+│   └── architecture.drawio # AWS resource diagram
+├── .github/
+│   └── workflows/
+│       ├── ci.yml         # Lint + test on pull requests
+│       └── deploy.yml     # Build, push to ECR, deploy to App Runner on main
 ├── .env.example           # Environment variable template
 └── pyproject.toml         # Dependencies and tool config
 ```
@@ -146,6 +206,4 @@ See `CLAUDE.md` for contributor conventions.
 
 ## AI-Assisted Development
 
-This project uses [Claude Code](https://claude.com/claude-code) as a development tool. Every change — architecture decisions, implementation, tests, and documentation — is reviewed and approved by the developer before it is committed. The expectation is that the developer can explain any decision, trade-off, or line of code in the repository.
-
-The workflow is deliberate: plan the approach, implement, review the diff, run tests, then commit. AI accelerates execution but does not replace engineering judgment — all technical decisions and their rationale are documented in the Architecture Decisions section of this README and in `CLAUDE.md`.
+This project is built with [Claude Code](https://claude.com/claude-code). Development conventions, architectural constraints, and contribution expectations are documented in `CLAUDE.md` — contributors are expected to read and follow it. All changes, regardless of how they were produced, are the responsibility of the person who commits them.
