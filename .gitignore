@@ -10,3 +10,4 @@ dist/
 .claude/cache
 .claude/history.jsonl
 .claude/sessions
+.DS_Store
