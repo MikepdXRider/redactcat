@@ -223,7 +223,9 @@ To test a service function in isolation (e.g., verifying the Comprehend call sha
 - No dead code, commented-out blocks, or unresolved TODOs in final output
 - Every function should do one thing and be nameable in plain English
 
-### Module docstrings
+### Comments and docstrings
+
+Use `#` for in-code comments. Reserve `"""..."""` docstrings for module-level only (top of file) and extremely important decisions that genuinely require multi-line explanation. Never add docstrings to classes or functions as a matter of routine.
 
 Every Python module in `app/` and `alembic/` must have a top-level docstring explaining why the file exists, how it connects to the rest of the app, and any design decisions embedded in it. Use PEP 257 multi-line format — summary line, blank line, body, closing `"""` on its own line:
 

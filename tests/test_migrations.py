@@ -53,6 +53,7 @@ def test_upgrade_creates_tables(tmp_path):
     tables = inspect(create_engine(db_url)).get_table_names()
     assert "users" in tables
     assert "refresh_tokens" in tables
+    assert "jobs" in tables
 
 
 def test_downgrade_drops_tables(tmp_path):
@@ -63,6 +64,7 @@ def test_downgrade_drops_tables(tmp_path):
     tables = inspect(create_engine(db_url)).get_table_names()
     assert "users" not in tables
     assert "refresh_tokens" not in tables
+    assert "jobs" not in tables
 
 
 def test_app_fails_without_migrations(tmp_path):
