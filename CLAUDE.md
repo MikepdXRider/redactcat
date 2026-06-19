@@ -32,7 +32,7 @@ docker build -t redactcat .
 docker run --rm -p 8000:8000 --env-file .env redactcat
 ```
 
-**Dev database:** If models change, delete `redactcat.db` and restart — there are no migrations in development. Tests always use a fresh in-memory database. See open issues for the RDS and Alembic migration roadmap.
+**Dev database:** If models change, delete `redactcat.db` and restart — there are no migrations in development. Tests always use a fresh in-memory database. See open issues for the production database and Alembic migration roadmap.
 
 ## Architecture
 

@@ -33,7 +33,7 @@ Endpoints that access user-owned resources raise `404` (not `403`) when a resour
 Job files are deleted from S3 immediately after the user downloads the redacted output. The only persistent record is a `UsageEvent` row with aggregate stats (no PII). This limits data retention exposure and eliminates a class of compliance risk.
 
 **SQLite for MVP, RDS PostgreSQL for production**
-The deployed service currently uses SQLite running in the App Runner container filesystem. SQLite is not durable across deployments — this is an intentional MVP tradeoff that keeps infrastructure simple while the API surface stabilizes. Migration to RDS PostgreSQL is tracked and will happen before the service handles real users. All datetime and schema decisions are made with PostgreSQL compatibility in mind.
+The deployed service currently uses SQLite running in the App Runner container filesystem. SQLite is not durable across deployments — this is an intentional MVP tradeoff that keeps infrastructure simple while the API surface stabilizes. Migration to a managed PostgreSQL database is tracked and will happen before the service handles real users. All datetime and schema decisions are made with PostgreSQL compatibility in mind.
 
 **Single `models.py` and `schemas.py`**
 All ORM models and Pydantic schemas live in one file each. This avoids circular imports, makes the full data model visible at a glance, and keeps `Base.metadata.create_all` deterministic.
