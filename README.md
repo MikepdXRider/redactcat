@@ -78,6 +78,9 @@ uv sync
 # Copy and fill in environment variables
 cp .env.example .env
 
+# Apply migrations to local DB
+uv run alembic upgrade head
+
 # Start the dev server
 uv run uvicorn app.main:app --reload
 
@@ -86,6 +89,22 @@ uv run pytest
 
 # Lint
 uv run ruff check .
+```
+
+### Local database
+
+```bash
+# Generate a migration after editing models
+uv run alembic revision --autogenerate -m "description"
+
+# Apply pending migrations
+uv run alembic upgrade head
+
+# Roll back all migrations (empty DB)
+uv run alembic downgrade base
+
+# Reset completely — delete the file and re-migrate
+rm redactcat.db && uv run alembic upgrade head
 ```
 
 ## Running with Docker
@@ -122,7 +141,7 @@ aws apprunner start-deployment \
 
 Merging to `main` triggers `.github/workflows/deploy.yml` automatically via OIDC — no AWS credentials stored in GitHub.
 
-**Database migrations** run automatically on container startup — `alembic upgrade head` executes before uvicorn accepts traffic. Multiple App Runner instances starting simultaneously are safe; Alembic uses a DB-level lock so only one applies pending migrations. For an existing database being brought under Alembic for the first time, run `alembic stamp head` to mark the current schema as already migrated without re-running it.
+**Database migrations** run automatically on container startup — `alembic upgrade head` executes before uvicorn accepts traffic. Multiple App Runner instances starting simultaneously are safe; Alembic uses a DB-level lock so only one applies pending migrations. For a database with existing tables but no `alembic_version` row, drop and recreate the tables rather than stamping — auto-deploy leaves no window to stamp after merge.
 
 **First-time infrastructure setup — set secrets after `terraform apply`:**
 
