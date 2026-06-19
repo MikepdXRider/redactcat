@@ -103,10 +103,7 @@ resource "aws_iam_role_policy" "apprunner_instance" {
       {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter", "ssm:GetParameters"]
-        Resource = [
-          aws_ssm_parameter.jwt_secret.arn,
-          aws_ssm_parameter.database_url.arn,
-        ]
+        Resource = "arn:aws:ssm:${var.region}:*:parameter/${var.app_name}/*"
       }
     ]
   })
