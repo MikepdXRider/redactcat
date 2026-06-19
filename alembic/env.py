@@ -1,3 +1,8 @@
+# Alembic migration runtime. Invoked by the `alembic` CLI and by container startup
+# (`alembic upgrade head`). Reads DATABASE_URL from app settings and registers
+# Base.metadata so autogenerate can diff models against the live schema.
+
+
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool

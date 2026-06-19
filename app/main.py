@@ -1,3 +1,8 @@
+# FastAPI app entry point. Routers are registered here with their URL prefixes; this
+# is the only place they are wired to the app. Schema is owned by Alembic — no
+# create_all at startup.
+
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

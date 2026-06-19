@@ -1,4 +1,8 @@
-# Application settings loaded from environment variables via pydantic-settings
+# Application settings resolved from environment variables and .env via pydantic-settings.
+# Imported as the `settings` singleton throughout the app. JWT_SECRET is required —
+# the app will not start without it.
+
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

@@ -1,3 +1,8 @@
+# Users router. All endpoints require get_current_user. DELETE /me explicitly purges
+# refresh tokens before deleting the user row; the FK cascade on refresh_tokens.user_id
+# is a safety net.
+
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session

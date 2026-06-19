@@ -1,3 +1,10 @@
+# Pydantic schemas enforced at request deserialization and response serialization —
+# the API's type contracts. Convention: XRead (response), XCreate/XRequest (request
+# body), XUpdate (partial), XLogin (auth input, no min_length so wrong credentials
+# return 401 not 422). Shared validation constants (e.g. PASSWORD_MIN_LENGTH) are
+# defined once here and referenced by name.
+
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
