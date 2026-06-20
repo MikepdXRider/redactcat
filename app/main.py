@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
+from app.routers.pdf import router as pdf_router
 from app.routers.text import router as text_router
 from app.routers.users import router as users_router
 
@@ -25,3 +26,4 @@ app.include_router(health_router, prefix="/health")
 app.include_router(auth_router, prefix="/auth")
 app.include_router(users_router, prefix="/users")
 app.include_router(text_router, prefix="/text")
+app.include_router(pdf_router, prefix="/pdf")

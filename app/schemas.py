@@ -78,3 +78,28 @@ class TextRedactRequest(BaseModel):
 
 class TextRedactRead(BaseModel):
     redacted_text: str
+
+
+class BoundingBox(BaseModel):
+    left: float
+    top: float
+    width: float
+    height: float
+
+
+class PdfEntityRead(DetectedEntity):
+    bboxes: list[BoundingBox]
+
+
+class PdfScanRead(BaseModel):
+    job_id: int
+    entities: list[PdfEntityRead]
+
+
+class PdfRedactRequest(BaseModel):
+    job_id: int
+    entities: list[PdfEntityRead]
+
+
+class PdfRedactRead(BaseModel):
+    download_url: str

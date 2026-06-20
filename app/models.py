@@ -13,6 +13,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    original_s3_key: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(UTC).replace(tzinfo=None)
+    )
+
+
 class User(Base):
     __tablename__ = "users"
 

@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       JWT_SECRET: ci-test-secret-not-used-in-production
+      S3_BUCKET: ci-test-bucket-not-used-in-production
+      AWS_DEFAULT_REGION: us-east-1
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

@@ -38,8 +38,7 @@ def db(engine) -> Session:
         session.close()
 
 
-@pytest.fixture
-def client(engine) -> TestClient:
+def _make_client(engine, raise_server_exceptions: bool = True) -> TestClient:
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override_get_db():
@@ -50,6 +49,19 @@ def client(engine) -> TestClient:
             _db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
+
+
+@pytest.fixture
+def client(engine) -> TestClient:
+    with _make_client(engine) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client_no_raise(engine) -> TestClient:
+    """TestClient that converts unhandled server exceptions to 500 responses instead of re-raising."""
+    with _make_client(engine, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()

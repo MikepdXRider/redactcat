@@ -1,6 +1,6 @@
 # redactcat
 
-A FastAPI service for detecting and redacting PII from text. Users submit text; AWS Comprehend detects PII entities; users review and confirm redactions; the service returns a redacted string. Text passes through in-memory — no PII is stored at any point.
+A FastAPI service for detecting and redacting PII from text and PDF documents. Users submit content; AWS Comprehend detects PII entities; users review and confirm redactions; the service returns redacted output. Text passes through in-memory — no PII is stored at any point. PDFs use ephemeral S3 storage between scan and redact, deleted immediately after the redacted file is delivered.
 
 ## Tech Stack
 
@@ -14,6 +14,8 @@ A FastAPI service for detecting and redacting PII from text. Users submit text; 
 | Linting | Ruff | Single tool replaces flake8, isort, and pyupgrade |
 | Testing | pytest + SQLite in-memory | Fast, fully isolated, no external services required for CI |
 | PII detection | AWS Comprehend | Managed NLP; sync API handles up to 100KB inline with no infrastructure to maintain |
+| PDF text extraction | AWS Textract | Handles scanned PDFs where text isn't directly exposed; sync API for single-page documents |
+| PDF redaction | PyMuPDF | Applies permanent black-box redactions at bounding box coordinates |
 
 ## Architecture Decisions
 
@@ -21,7 +23,12 @@ A FastAPI service for detecting and redacting PII from text. Users submit text; 
 Access tokens are short-lived JWTs (30min) with no server-side storage. Refresh tokens are opaque strings stored in the `refresh_tokens` table. Each `/auth/refresh` call rotates the pair — the old row is deleted and a new token pair is issued. Logout is a single DB delete. This avoids a token blacklist while giving stolen refresh tokens only a one-use window before detection.
 
 **Stateless text scan and redact**
-Text passes through in-memory — no PII is written to the database or S3 at any point. `/text/scan` returns the source text alongside detected entities; the client can POST that response body directly to `/text/redact` after filtering. The client controls which entities to redact (by confidence threshold, entity type, etc.) and can produce multiple redacted variants from a single scan. PDF support will introduce a stateful flow (`/pdf/*`) with S3 ephemeral storage when implemented.
+Text passes through in-memory — no PII is written to the database or S3 at any point. `/text/scan` returns the source text alongside detected entities; the client can POST that response body directly to `/text/redact` after filtering. The client controls which entities to redact (by confidence threshold, entity type, etc.) and can produce multiple redacted variants from a single scan.
+
+**Minimal-stateful PDF scan and redact**
+PDFs require two calls: `/pdf/scan` uploads the source file to S3 and returns detected entities with word-level bounding boxes; `/pdf/redact` accepts the filtered entity list, applies redactions, returns a presigned download URL (5 min TTL), then deletes the original S3 object and the Job row. Jobs expire after 1 hour — calling `/pdf/redact` on an expired job returns 410. The redacted PDF remains in S3 until the user downloads it; the bucket lifecycle rule handles cleanup. Only the `Job` row (job_id, user_id, s3_key) persists between calls — entity data and bounding boxes travel in HTTP payloads, never written to the DB. The scan response shape matches the redact request body exactly; the client filters the entity list and POSTs it back without reshaping.
+
+Textract is used for text extraction (rather than PyMuPDF) so that scanned PDFs with no directly exposed text are handled correctly. Comprehend's synchronous API is text-only, so the pipeline is: S3 → Textract (extracts text + word bboxes) → Comprehend (detects PII at character offsets) → map offsets back to Textract bboxes in memory.
 
 **Naive UTC datetimes**
 All datetimes are computed in UTC and stored timezone-naive (`datetime.now(UTC).replace(tzinfo=None)`). SQLite has no native timezone support; PostgreSQL `TIMESTAMP WITHOUT TIME ZONE` accepts naive values. The UTC convention is enforced at the application layer — no mixed-offset data enters the DB.
@@ -52,6 +59,8 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | DELETE | /users/me | ✓ | Delete account and all active sessions |
 | POST | /text/scan | ✓ | Detect PII entities in text; returns source text + entity list |
 | POST | /text/redact | ✓ | Apply redactions to text; returns redacted string |
+| POST | /pdf/scan | ✓ | Upload single-page PDF, detect PII; returns job_id + entities with bboxes |
+| POST | /pdf/redact | ✓ | Apply redactions to PDF; returns presigned download URL, deletes job |
 
 Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
 
@@ -69,6 +78,20 @@ Returns: { "redacted_text": "My name is [REDACTED] and my SSN is [REDACTED]" }
 
 The scan response can be posted directly to redact — filter the `entities` array first to select which PII to redact. `replacement` is optional and defaults to `"[REDACTED]"`; pass an empty string to delete PII rather than substitute it.
 
+### PDF workflow
+
+```
+POST /pdf/scan
+Body:    multipart/form-data — file (PDF, single page only)
+Returns: { "job_id": 1, "entities": [{ "entity_type", "text", "start_offset", "end_offset", "confidence", "bboxes": [{ "left", "top", "width", "height" }] }] }
+
+POST /pdf/redact
+Body:    { "job_id": 1, "entities": [...] }   ← filtered scan response
+Returns: { "download_url": "https://..." }     ← presigned S3 URL (5 min TTL)
+```
+
+The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. Bounding boxes are Textract normalized coordinates (0–1 fractions of page dimensions). Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour; the presigned URL gives a 5-minute download window.
+
 ## Quickstart
 
 ```bash
@@ -81,8 +104,8 @@ cp .env.example .env
 # Apply migrations to local DB
 uv run alembic upgrade head
 
-# Start the dev server
-uv run uvicorn app.main:app --reload
+# Start the dev server (AWS_PROFILE required for Comprehend, Textract, S3)
+AWS_PROFILE=<your-profile> uv run uvicorn app.main:app --reload
 
 # Run tests
 uv run pytest
@@ -143,6 +166,8 @@ Merging to `main` triggers `.github/workflows/deploy.yml` automatically via OIDC
 
 **Database migrations** run automatically on container startup — `alembic upgrade head` executes before uvicorn accepts traffic. Multiple App Runner instances starting simultaneously are safe; Alembic uses a DB-level lock so only one applies pending migrations. For a database with existing tables but no `alembic_version` row, drop and recreate the tables rather than stamping — auto-deploy leaves no window to stamp after merge.
 
+**Infrastructure changes must be applied before deploying code** — any PR that adds a new IAM permission or AWS resource requires `terraform apply` before merging to avoid a window where the deployed code calls services it isn't yet authorized to use.
+
 **First-time infrastructure setup — set secrets after `terraform apply`:**
 
 `terraform apply` initializes SSM parameters with placeholder values. Before the app will start, set the real values:
@@ -175,9 +200,10 @@ Subsequent `terraform apply` runs will not overwrite these values. Only required
 | `JWT_ALGORITHM` | No | `HS256` | JWT signing algorithm |
 | `JWT_EXPIRE_MINUTES` | No | `30` | Access token lifetime in minutes |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `30` | Refresh token lifetime in days |
+| `S3_BUCKET` | **Yes** | — | S3 bucket name for ephemeral PDF job storage; app will not start without it |
 | `AWS_PROFILE` | Yes† | — | Named AWS profile from `~/.aws/credentials`; provides credentials and region |
 
-†Required for text scan/redact (Comprehend). Auth and user endpoints run without AWS credentials.
+†Required locally for Comprehend, Textract, and S3. Not used in production — App Runner uses the instance IAM role. Set in shell (`AWS_PROFILE=x uv run uvicorn ...`); not injected automatically from `.env`.
 
 ## Project Structure
 
@@ -193,16 +219,21 @@ redactcat/
 │   ├── routers/
 │   │   ├── auth.py        # Register, login, logout, token refresh
 │   │   ├── health.py      # Health check
-│   │   ├── text.py        # PII scan and redaction (stateless)
+│   │   ├── pdf.py         # PDF PII scan and redaction (stateful, S3-backed)
+│   │   ├── text.py        # Text PII scan and redaction (stateless)
 │   │   └── users.py       # User profile (get, update, delete)
 │   └── services/
 │       ├── detection.py   # AWS Comprehend PII detection
-│       └── redaction.py   # Text redaction (string substitution)
+│       ├── extraction.py  # AWS Textract PDF text extraction + word bbox mapping
+│       ├── redaction.py   # Text redaction (string substitution)
+│       └── storage.py     # S3 upload, download, delete, presigned URL
 ├── tests/
 │   ├── conftest.py        # Fixtures: engine, db session, TestClient
 │   ├── test_auth.py       # Auth endpoint tests
 │   ├── test_detection.py  # Comprehend service unit tests (botocore Stubber)
 │   ├── test_health.py     # Health check test
+│   ├── test_migrations.py # Alembic upgrade/downgrade integration tests
+│   ├── test_pdf.py        # /pdf/scan and /pdf/redact endpoint tests
 │   ├── test_text.py       # /text/scan and /text/redact endpoint tests
 │   └── test_users.py      # User profile endpoint tests
 ├── infra/                 # Terraform — ECR, App Runner, S3, IAM, SSM, Route 53
@@ -215,9 +246,15 @@ redactcat/
 
 ## How It Works
 
+**Text:**
 1. **Scan** — user POSTs text to `/text/scan`; AWS Comprehend detects PII entities and returns them with character offsets and confidence scores
 2. **Review** — client filters the entity list (by type, confidence, or any other criteria)
 3. **Redact** — user POSTs the original text and selected entities to `/text/redact`; service applies substitutions and returns the redacted string
+
+**PDF:**
+1. **Scan** — user POSTs a single-page PDF to `/pdf/scan`; service uploads to S3, extracts text and word bounding boxes via Textract, detects PII with Comprehend, maps character offsets to bboxes, returns `{ job_id, entities[] }`
+2. **Review** — client filters the entity list
+3. **Redact** — user POSTs `{ job_id, entities[] }` to `/pdf/redact`; service downloads the PDF from S3, applies PyMuPDF black-box redactions at the supplied bboxes, returns a presigned download URL (5 min TTL), then deletes the original S3 object and the Job row. Jobs expire after 1 hour (410 Gone). The redacted PDF is not deleted immediately — the bucket lifecycle rule cleans it up after the download window
 
 See `CLAUDE.md` for contributor conventions.
 
