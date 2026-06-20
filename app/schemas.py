@@ -87,12 +87,7 @@ class BoundingBox(BaseModel):
     height: float
 
 
-class PdfEntityRead(BaseModel):
-    entity_type: str
-    text: str
-    start_offset: int
-    end_offset: int
-    confidence: float
+class PdfEntityRead(DetectedEntity):
     bboxes: list[BoundingBox]
 
 
