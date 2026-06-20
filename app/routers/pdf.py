@@ -38,6 +38,8 @@ router = APIRouter(tags=["pdf"])
 
 _JOB_TTL = timedelta(hours=1)
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+_ORIGINAL_FILENAME = "original.pdf"
+_REDACTED_FILENAME = "redacted.pdf"
 
 
 def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list[BoundingBox]:
@@ -50,7 +52,7 @@ def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list
 
 def _expire_job(bucket: str, original_key: str) -> None:
     # Best-effort S3 cleanup for expired or missing jobs. DB row is already gone.
-    redacted_key = original_key.rsplit("/", 1)[0] + "/redacted.pdf"
+    redacted_key = original_key.rsplit("/", 1)[0] + f"/{_REDACTED_FILENAME}"
     for key in [original_key, redacted_key]:
         try:
             delete_from_s3(bucket, key)
@@ -84,7 +86,7 @@ def scan_pdf(
             detail="Only single-page PDFs are supported",
         )
 
-    s3_key = f"pdfs/{current_user.id}/{secrets.token_urlsafe(16)}/original.pdf"
+    s3_key = f"pdfs/{current_user.id}/{secrets.token_urlsafe(16)}/{_ORIGINAL_FILENAME}"
     upload_to_s3(pdf_bytes, settings.S3_BUCKET, s3_key)
 
     # Job row is created only after both AWS calls succeed. If either raises,
@@ -149,7 +151,7 @@ def redact_pdf(
 
     redacted_bytes = apply_pdf_redactions(pdf_bytes, body.entities)
 
-    redacted_key = original_s3_key.rsplit("/", 1)[0] + "/redacted.pdf"
+    redacted_key = original_s3_key.rsplit("/", 1)[0] + f"/{_REDACTED_FILENAME}"
     upload_to_s3(redacted_bytes, settings.S3_BUCKET, redacted_key)
 
     download_url = generate_presigned_url(settings.S3_BUCKET, redacted_key)
