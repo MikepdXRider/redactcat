@@ -323,25 +323,7 @@ def test_redact_calls_s3_cleanup(client: TestClient, one_page_pdf: bytes) -> Non
     assert deleted_key.endswith("/original.pdf")
 
 
-def test_redact_expired_job_returns_410(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
-    tokens = _register(client)
-    scan = _do_scan(client, tokens, one_page_pdf)
-
-    job = db.get(Job, scan["job_id"])
-    job.created_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=2)
-    db.commit()
-
-    with patch("app.routers.pdf.delete_from_s3"):
-        response = client.post(
-            "/pdf/redact",
-            json={"job_id": scan["job_id"], "entities": []},
-            headers={"Authorization": f"Bearer {tokens['access_token']}"},
-        )
-
-    assert response.status_code == 410
-
-
-def test_redact_expired_job_cleans_up_db(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+def test_redact_expired_job(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     scan = _do_scan(client, tokens, one_page_pdf)
     job_id = scan["job_id"]
@@ -351,12 +333,13 @@ def test_redact_expired_job_cleans_up_db(client: TestClient, db: Session, one_pa
     db.commit()
 
     with patch("app.routers.pdf.delete_from_s3"):
-        client.post(
+        response = client.post(
             "/pdf/redact",
             json={"job_id": job_id, "entities": []},
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
         )
 
+    assert response.status_code == 410
     db.expire_all()
     assert db.get(Job, job_id) is None
 
