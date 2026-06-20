@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 import boto3
 
+_textract = boto3.client("textract")
+
 
 @dataclass
 class WordSpan:
@@ -25,8 +27,7 @@ class WordSpan:
 
 
 def extract_text_from_pdf_s3(bucket: str, key: str) -> tuple[str, list[WordSpan]]:
-    client = boto3.client("textract")
-    response = client.detect_document_text(
+    response = _textract.detect_document_text(
         Document={"S3Object": {"Bucket": bucket, "Name": key}}
     )
 

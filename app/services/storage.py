@@ -7,22 +7,24 @@ download via presigned URL; the bucket lifecycle rule (1-day expiration) cleans 
 
 import boto3
 
+_s3 = boto3.client("s3")
+
 
 def upload_to_s3(data: bytes, bucket: str, key: str) -> None:
-    boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=data)
+    _s3.put_object(Bucket=bucket, Key=key, Body=data)
 
 
 def download_from_s3(bucket: str, key: str) -> bytes:
-    response = boto3.client("s3").get_object(Bucket=bucket, Key=key)
+    response = _s3.get_object(Bucket=bucket, Key=key)
     return response["Body"].read()
 
 
 def delete_from_s3(bucket: str, key: str) -> None:
-    boto3.client("s3").delete_object(Bucket=bucket, Key=key)
+    _s3.delete_object(Bucket=bucket, Key=key)
 
 
 def generate_presigned_url(bucket: str, key: str, ttl_seconds: int = 300) -> str:
-    return boto3.client("s3").generate_presigned_url(
+    return _s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": key},
         ExpiresIn=ttl_seconds,
