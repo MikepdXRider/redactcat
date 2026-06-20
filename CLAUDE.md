@@ -131,6 +131,24 @@ if not record or record.user_id != current_user.id:
 
 Stateless endpoints (`/text/*`) have no stored resources and require no ownership check.
 
+For endpoints where concurrent access is a concern, use `DELETE ... RETURNING` to atomically claim and verify ownership in one statement rather than SELECT + Python check + DELETE:
+
+```python
+from sqlalchemy import delete
+
+stmt = (
+    delete(Model)
+    .where(Model.id == record_id, Model.user_id == current_user.id)
+    .returning(Model.col_a, Model.col_b)  # raw columns, not the ORM class
+)
+row = db.execute(stmt).first()
+if not row:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+db.commit()  # commit immediately so concurrent callers see the deletion
+```
+
+Return raw columns (not `.returning(Model)`) — returning the ORM class causes SQLAlchemy to track the deleted instance and raises `ObjectDeletedError` on commit.
+
 ### Text Flow (Stateless)
 
 Text passes through in-memory — no PII is written to the database or S3 at any point.
@@ -145,18 +163,20 @@ PDF is a separate stateful flow (`/pdf/*`) backed by S3 ephemeral storage:
 
 1. `POST /pdf/scan` — validates single-page PDF, uploads to S3, extracts text via Textract, detects PII with Comprehend, maps character offsets to word-level bboxes, returns `{ job_id, entities[] }` with bboxes embedded
 2. Client filters entities
-3. `POST /pdf/redact` — accepts the filtered scan response, downloads PDF from S3, applies PyMuPDF redactions at client-supplied bboxes, returns a presigned download URL, then deletes both S3 objects and the Job row
+3. `POST /pdf/redact` — accepts the filtered scan response, atomically claims the Job row via `DELETE RETURNING`, applies PyMuPDF redactions, returns a presigned download URL (5 min TTL), deletes the original S3 object and the Job row. Jobs expire after 1 hour; expired jobs or missing S3 objects return 410. The redacted PDF remains in S3 for download; the bucket lifecycle rule cleans it up.
 
 Only the `Job` row (job_id, user_id, original_s3_key) and source PDF persist between calls. Entity data and bboxes travel in HTTP payloads — no PII is written to the DB.
 
 ### Ephemeral Storage (S3)
 
-PDF files are not retained after the user receives the redacted output. At the end of `POST /pdf/redact`:
+At the end of `POST /pdf/redact`:
 1. Upload redacted PDF to S3
 2. Generate a short-TTL presigned S3 URL (5 min)
-3. Delete original and redacted S3 objects
+3. Delete the original S3 object (no longer needed)
 4. Delete the Job row
 5. Return the presigned URL
+
+The redacted file is not deleted immediately — it must remain accessible until the user downloads it via the presigned URL. The S3 bucket lifecycle rule (1-day expiration) handles cleanup.
 
 ### SQLite FK Enforcement
 
@@ -206,11 +226,12 @@ raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 Before writing tests for any new endpoint, invoke the `api-testing` skill (`/api-testing`). It encodes the full coverage matrix for this project — auth enforcement, cross-user isolation, DTO shape, DB-level assertions, and auth lifecycle. Running it proactively prevents gap reviews after the fact.
 
-`tests/conftest.py` provides three fixtures that compose together:
+`tests/conftest.py` provides four fixtures that compose together:
 
 - `engine` — creates a fresh in-memory SQLite engine with `StaticPool`, runs `create_all`, tears down with `drop_all` after the test
 - `db` — yields a `Session` bound to the engine for **DB-level assertions** (use when behavior isn't surfaced by any endpoint response)
-- `client` — yields a `TestClient` with `get_db` overridden to use the same engine
+- `client` — yields a `TestClient` with `get_db` overridden to use the same engine; unhandled server exceptions are re-raised into the test process (`raise_server_exceptions=True`)
+- `client_no_raise` — same as `client` but with `raise_server_exceptions=False`; use when you need to assert on a 500 status code or inspect DB side effects after an unhandled server error
 
 `StaticPool` forces all connections to reuse one underlying connection so the test's `db` session sees data committed by the app during a request. Override `get_db` via `app.dependency_overrides` — never touch the production engine. AWS service calls (Comprehend, Textract, S3) are always mocked in tests.
 

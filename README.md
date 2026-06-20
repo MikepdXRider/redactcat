@@ -26,7 +26,7 @@ Access tokens are short-lived JWTs (30min) with no server-side storage. Refresh 
 Text passes through in-memory — no PII is written to the database or S3 at any point. `/text/scan` returns the source text alongside detected entities; the client can POST that response body directly to `/text/redact` after filtering. The client controls which entities to redact (by confidence threshold, entity type, etc.) and can produce multiple redacted variants from a single scan.
 
 **Minimal-stateful PDF scan and redact**
-PDFs require two calls: `/pdf/scan` uploads the source file to S3 and returns detected entities with word-level bounding boxes; `/pdf/redact` accepts the filtered entity list, applies redactions, returns a presigned download URL, then deletes both S3 objects and the Job row. Only the `Job` row (job_id, user_id, s3_key) persists between calls — entity data and bounding boxes travel in HTTP payloads, never written to the DB. The scan response shape matches the redact request body exactly; the client filters the entity list and POSTs it back without reshaping.
+PDFs require two calls: `/pdf/scan` uploads the source file to S3 and returns detected entities with word-level bounding boxes; `/pdf/redact` accepts the filtered entity list, applies redactions, returns a presigned download URL (5 min TTL), then deletes the original S3 object and the Job row. Jobs expire after 1 hour — calling `/pdf/redact` on an expired job returns 410. The redacted PDF remains in S3 until the user downloads it; the bucket lifecycle rule handles cleanup. Only the `Job` row (job_id, user_id, s3_key) persists between calls — entity data and bounding boxes travel in HTTP payloads, never written to the DB. The scan response shape matches the redact request body exactly; the client filters the entity list and POSTs it back without reshaping.
 
 Textract is used for text extraction (rather than PyMuPDF) so that scanned PDFs with no directly exposed text are handled correctly. Comprehend's synchronous API is text-only, so the pipeline is: S3 → Textract (extracts text + word bboxes) → Comprehend (detects PII at character offsets) → map offsets back to Textract bboxes in memory.
 
@@ -90,7 +90,7 @@ Body:    { "job_id": 1, "entities": [...] }   ← filtered scan response
 Returns: { "download_url": "https://..." }     ← presigned S3 URL (5 min TTL)
 ```
 
-The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. Bounding boxes are Textract normalized coordinates (0–1 fractions of page dimensions). The Job row and source PDF are deleted after `/pdf/redact` completes; the presigned URL gives a 5-minute window to download.
+The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. Bounding boxes are Textract normalized coordinates (0–1 fractions of page dimensions). Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour; the presigned URL gives a 5-minute download window.
 
 ## Quickstart
 
@@ -254,7 +254,7 @@ redactcat/
 **PDF:**
 1. **Scan** — user POSTs a single-page PDF to `/pdf/scan`; service uploads to S3, extracts text and word bounding boxes via Textract, detects PII with Comprehend, maps character offsets to bboxes, returns `{ job_id, entities[] }`
 2. **Review** — client filters the entity list
-3. **Redact** — user POSTs `{ job_id, entities[] }` to `/pdf/redact`; service downloads the PDF from S3, applies PyMuPDF redactions at the supplied bboxes, returns a presigned download URL (5 min TTL), then deletes all S3 objects and the Job row
+3. **Redact** — user POSTs `{ job_id, entities[] }` to `/pdf/redact`; service downloads the PDF from S3, applies PyMuPDF black-box redactions at the supplied bboxes, returns a presigned download URL (5 min TTL), then deletes the original S3 object and the Job row. Jobs expire after 1 hour (410 Gone). The redacted PDF is not deleted immediately — the bucket lifecycle rule cleans it up after the download window
 
 See `CLAUDE.md` for contributor conventions.
 

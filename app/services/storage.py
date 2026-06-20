@@ -1,8 +1,8 @@
 """S3 storage helpers for ephemeral PDF file management.
 
-Wraps boto3 S3 operations used by the PDF scan/redact flow. Files are short-lived:
-originals are deleted after redaction; redacted outputs are deleted immediately after
-the presigned URL is generated.
+Wraps boto3 S3 operations used by the PDF scan/redact flow. Originals are deleted
+immediately after redaction. Redacted outputs are left in S3 for the client to
+download via presigned URL; the bucket lifecycle rule (1-day expiration) cleans them up.
 """
 
 import boto3

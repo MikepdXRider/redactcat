@@ -99,3 +99,12 @@ class PdfEntityRead(BaseModel):
 class PdfScanRead(BaseModel):
     job_id: int
     entities: list[PdfEntityRead]
+
+
+class PdfRedactRequest(BaseModel):
+    job_id: int
+    entities: list[PdfEntityRead]
+
+
+class PdfRedactRead(BaseModel):
+    download_url: str
