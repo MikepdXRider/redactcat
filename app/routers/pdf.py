@@ -49,7 +49,7 @@ def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list
 
 
 def _expire_job(bucket: str, original_key: str) -> None:
-    """Best-effort S3 cleanup for expired or missing jobs. DB row is already gone."""
+    # Best-effort S3 cleanup for expired or missing jobs. DB row is already gone.
     redacted_key = original_key.rsplit("/", 1)[0] + "/redacted.pdf"
     for key in [original_key, redacted_key]:
         try:
