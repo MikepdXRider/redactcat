@@ -288,6 +288,8 @@ A `PostToolUse` hook in `.claude/settings.json` runs ruff automatically after ev
   - Example: `feat(redactions): add text redaction endpoint`
 - Run `uv run ruff check .` and `uv run pytest` before committing — never commit code that fails either
 - Never bundle unrelated changes in one commit
+- **Never push directly to `main`** — all changes go through a feature branch and PR, regardless of size. Main has branch protection; admin bypass is not acceptable without explicit user direction.
+- To bring a feature branch up to date with main: `git checkout <branch> && git merge origin/main` — do not switch to main to do this
 
 ## After Every Meaningful Change
 
