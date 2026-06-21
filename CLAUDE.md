@@ -246,6 +246,7 @@ Current patch targets:
 - `app.routers.pdf.delete_from_s3` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf.py` (redact endpoint)
+- `app.routers.pdf.detect_faces` — mock in `tests/test_pdf.py` (scan endpoint, face detection)
 
 To test a service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 
@@ -288,6 +289,8 @@ A `PostToolUse` hook in `.claude/settings.json` runs ruff automatically after ev
   - Example: `feat(redactions): add text redaction endpoint`
 - Run `uv run ruff check .` and `uv run pytest` before committing — never commit code that fails either
 - Never bundle unrelated changes in one commit
+- **Never push directly to `main`** — all changes go through a feature branch and PR, regardless of size. Main has branch protection; admin bypass is not acceptable without explicit user direction.
+- To bring a feature branch up to date with main: `git checkout <branch> && git merge origin/main` — do not switch to main to do this
 
 ## After Every Meaningful Change
 

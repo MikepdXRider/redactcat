@@ -92,7 +92,7 @@ resource "aws_iam_role_policy" "apprunner_instance" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["comprehend:DetectPiiEntities", "textract:DetectDocumentText"]
+        Action   = ["comprehend:DetectPiiEntities", "textract:DetectDocumentText", "rekognition:DetectFaces"]
         Resource = "*"
       },
       {
