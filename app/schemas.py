@@ -7,6 +7,7 @@ defined once here and referenced by name.
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -88,7 +89,7 @@ class BoundingBox(BaseModel):
 
 
 class PdfEntityRead(DetectedEntity):
-    source: str
+    source: Literal["COMPREHEND", "REKOGNITION"]
     bboxes: list[BoundingBox]
 
 
