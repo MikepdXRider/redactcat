@@ -78,9 +78,6 @@ Format: `type(scope): imperative description`
 ## Why it matters
 [Consequence of not addressing it — who is affected, what breaks, what risk exists.]
 
-## Priority
-[short-term / mid-term / long-term] — [one-sentence rationale]
-
 ## Options
 
 ### A — [Option name]
@@ -104,9 +101,6 @@ Use only when scope and deliverables are already decided.
 ```
 ## Goal
 [One sentence: what this feature does and for whom.]
-
-## Priority
-[short-term / mid-term / long-term] — [one-sentence rationale]
 
 ## Deliverables
 - [Specific, completable item]
