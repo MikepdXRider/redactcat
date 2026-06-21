@@ -88,6 +88,7 @@ class BoundingBox(BaseModel):
 
 
 class PdfEntityRead(DetectedEntity):
+    source: str
     bboxes: list[BoundingBox]
 
 

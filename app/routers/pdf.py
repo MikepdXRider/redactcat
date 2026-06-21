@@ -105,6 +105,7 @@ def scan_pdf(
 
     text_entities = [
         PdfEntityRead(
+            source="COMPREHEND",
             entity_type=e.entity_type,
             text=e.text,
             start_offset=e.start_offset,
@@ -116,6 +117,7 @@ def scan_pdf(
     ]
     face_entities = [
         PdfEntityRead(
+            source="REKOGNITION",
             entity_type="FACE",
             text="",
             start_offset=0,

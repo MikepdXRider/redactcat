@@ -176,7 +176,8 @@ def test_scan_returns_entities(client: TestClient, one_page_pdf: bytes) -> None:
     assert len(data["entities"]) == 1
 
     entity = data["entities"][0]
-    assert set(entity.keys()) == {"entity_type", "text", "start_offset", "end_offset", "confidence", "bboxes"}
+    assert set(entity.keys()) == {"source", "entity_type", "text", "start_offset", "end_offset", "confidence", "bboxes"}
+    assert entity["source"] == "COMPREHEND"
     assert entity["entity_type"] == "NAME"
     assert entity["text"] == "John Doe"
     assert entity["start_offset"] == 0
@@ -285,6 +286,7 @@ def test_scan_with_images_face_detected(client: TestClient, one_page_pdf_with_im
     assert len(data["entities"]) == 1
 
     entity = data["entities"][0]
+    assert entity["source"] == "REKOGNITION"
     assert entity["entity_type"] == "FACE"
     assert entity["text"] == ""
     assert entity["start_offset"] == 0
