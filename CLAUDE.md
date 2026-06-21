@@ -246,6 +246,7 @@ Current patch targets:
 - `app.routers.pdf.delete_from_s3` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf.py` (redact endpoint)
+- `app.routers.pdf.detect_faces` — mock in `tests/test_pdf.py` (scan endpoint, face detection)
 
 To test a service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 

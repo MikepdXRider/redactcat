@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import Job
-from app.schemas import DetectedEntity
+from app.schemas import BoundingBox, DetectedEntity
 from app.services.extraction import WordSpan
+from app.services.rekognition import FaceDetection
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "secret123") -> dict:
@@ -22,6 +23,19 @@ def one_page_pdf() -> bytes:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((100, 100), "John Doe lives at 123 Main St")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    return pdf_bytes
+
+
+@pytest.fixture
+def one_page_pdf_with_image() -> bytes:
+    doc = fitz.open()
+    page = doc.new_page()
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 10, 10))
+    pix.clear_with(255)
+    rect = fitz.Rect(100, 100, 200, 200)
+    page.insert_image(rect, pixmap=pix)
     pdf_bytes = doc.tobytes()
     doc.close()
     return pdf_bytes
@@ -57,11 +71,21 @@ def _mock_entities(_text: str) -> list[DetectedEntity]:
     ]
 
 
+def _mock_face() -> list[FaceDetection]:
+    return [
+        FaceDetection(
+            confidence=0.98,
+            bbox=BoundingBox(left=0.1, top=0.2, width=0.15, height=0.2),
+        )
+    ]
+
+
 def _do_scan(client: TestClient, tokens: dict, one_page_pdf: bytes) -> dict:
     with (
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
     ):
         return client.post(
             "/pdf/scan",
@@ -137,6 +161,7 @@ def test_scan_returns_entities(client: TestClient, one_page_pdf: bytes) -> None:
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -168,6 +193,7 @@ def test_scan_no_entities(client: TestClient, one_page_pdf: bytes) -> None:
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("Nothing sensitive", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -203,6 +229,7 @@ def test_scan_creates_job_in_db(client: TestClient, db: Session, one_page_pdf: b
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -217,6 +244,123 @@ def test_scan_creates_job_in_db(client: TestClient, db: Session, one_page_pdf: b
     assert job is not None
     assert job.original_s3_key.endswith("/original.pdf")
     assert "pdfs/" in job.original_s3_key
+
+
+# --- Rekognition face detection ---
+
+def test_scan_no_images_rekognition_not_called(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("text", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces") as mock_detect_faces,
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    mock_detect_faces.assert_not_called()
+
+
+def test_scan_with_images_face_detected(client: TestClient, one_page_pdf_with_image: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf_with_image, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["entities"]) == 1
+
+    entity = data["entities"][0]
+    assert entity["entity_type"] == "FACE"
+    assert entity["text"] == ""
+    assert entity["start_offset"] == 0
+    assert entity["end_offset"] == 0
+    assert pytest.approx(entity["confidence"]) == 0.98
+    assert len(entity["bboxes"]) == 1
+    assert set(entity["bboxes"][0].keys()) == {"left", "top", "width", "height"}
+
+
+def test_scan_rekognition_failure_does_not_create_job(
+    client_no_raise: TestClient, db: Session, one_page_pdf_with_image: bytes
+) -> None:
+    tokens = _register(client_no_raise)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", side_effect=Exception("Rekognition unavailable")),
+    ):
+        response = client_no_raise.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf_with_image, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 500
+    assert db.query(Job).count() == 0
+
+
+def test_scan_with_images_no_faces(client: TestClient, one_page_pdf_with_image: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf_with_image, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["entities"] == []
+
+
+def test_redact_face_entity(client: TestClient, one_page_pdf_with_image: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
+    ):
+        scan = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf_with_image, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        ).json()
+
+    with (
+        patch("app.routers.pdf.download_from_s3", return_value=one_page_pdf_with_image),
+        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
+        patch("app.routers.pdf.delete_from_s3"),
+    ):
+        response = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": scan["entities"]},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
 
 
 # --- POST /pdf/redact ---
