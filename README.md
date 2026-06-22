@@ -12,6 +12,7 @@ A FastAPI service for detecting and redacting PII from text and PDF documents. U
 | Validation | Pydantic v2 | Co-designed with FastAPI; field-level constraints enforced at the request boundary |
 | Package management | uv | Near-instant installs, lockfile determinism, replaces pip + venv |
 | Linting | Ruff | Single tool replaces flake8, isort, and pyupgrade |
+| Type checking | mypy + pydantic plugin | Catches type mismatches at call boundaries statically, independent of test coverage |
 | Testing | pytest + SQLite in-memory | Fast, fully isolated, no external services required for CI |
 | PII detection | AWS Comprehend | Managed NLP; sync API handles up to 100KB inline with no infrastructure to maintain |
 | PDF text extraction | AWS Textract | Handles scanned PDFs where text isn't directly exposed; sync API for single-page documents |
@@ -119,6 +120,9 @@ uv run pytest
 
 # Lint
 uv run ruff check .
+
+# Type check
+uv run mypy app
 ```
 
 ### Local database

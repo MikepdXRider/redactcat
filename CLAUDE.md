@@ -22,6 +22,9 @@ uv run pytest -v
 # Lint
 uv run ruff check .
 
+# Type check
+uv run mypy app
+
 # Start dev server
 uv run uvicorn app.main:app --reload
 
