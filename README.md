@@ -16,6 +16,8 @@ A FastAPI service for detecting and redacting PII from text and PDF documents. U
 | PII detection | AWS Comprehend | Managed NLP; sync API handles up to 100KB inline with no infrastructure to maintain |
 | PDF text extraction | AWS Textract | Handles scanned PDFs where text isn't directly exposed; sync API for single-page documents |
 | PDF redaction | PyMuPDF | Applies permanent black-box redactions at bounding box coordinates |
+| Face detection | AWS Rekognition | Detects faces in embedded PDF images; sync inline-bytes API, no infrastructure to maintain |
+| Barcode/QR detection | pyzbar + libzbar0 | Decodes QR codes and barcodes rendered as vector or raster content on the page |
 
 ## Architecture Decisions
 
@@ -26,9 +28,14 @@ Access tokens are short-lived JWTs (30min) with no server-side storage. Refresh 
 Text passes through in-memory — no PII is written to the database or S3 at any point. `/text/scan` returns the source text alongside detected entities; the client can POST that response body directly to `/text/redact` after filtering. The client controls which entities to redact (by confidence threshold, entity type, etc.) and can produce multiple redacted variants from a single scan.
 
 **Minimal-stateful PDF scan and redact**
-PDFs require two calls: `/pdf/scan` uploads the source file to S3 and returns detected entities with word-level bounding boxes; `/pdf/redact` accepts the filtered entity list, applies redactions, returns a presigned download URL (5 min TTL), then deletes the original S3 object and the Job row. Jobs expire after 1 hour — calling `/pdf/redact` on an expired job returns 410. The redacted PDF remains in S3 until the user downloads it; the bucket lifecycle rule handles cleanup. Only the `Job` row (job_id, user_id, s3_key) persists between calls — entity data and bounding boxes travel in HTTP payloads, never written to the DB. The scan response shape matches the redact request body exactly; the client filters the entity list and POSTs it back without reshaping.
+PDFs require two calls: `/pdf/scan` uploads the source file to S3 and returns detected entities with bounding boxes from up to three detection sources; `/pdf/redact` accepts the filtered entity list, applies redactions, returns a presigned download URL (5 min TTL), then deletes the original S3 object and the Job row. Jobs expire after 1 hour — calling `/pdf/redact` on an expired job returns 410. The redacted PDF remains in S3 until the user downloads it; the bucket lifecycle rule handles cleanup. Only the `Job` row (job_id, user_id, s3_key) persists between calls — entity data and bounding boxes travel in HTTP payloads, never written to the DB. The scan response shape matches the redact request body exactly; the client filters the entity list and POSTs it back without reshaping.
 
-Textract is used for text extraction (rather than PyMuPDF) so that scanned PDFs with no directly exposed text are handled correctly. Comprehend's synchronous API is text-only, so the pipeline is: S3 → Textract (extracts text + word bboxes) → Comprehend (detects PII at character offsets) → map offsets back to Textract bboxes in memory.
+A single `/pdf/scan` call runs three detection pipelines in sequence:
+1. **Text PII** — S3 → Textract (text + word bboxes) → Comprehend (PII at character offsets) → map offsets back to word bboxes. Textract is used rather than PyMuPDF so that scanned PDFs with no directly exposed text are handled correctly.
+2. **Faces** — if the page has embedded images, the rendered page pixmap (JPEG) is sent to Rekognition `detect_faces`; each face becomes a `REKOGNITION` entity with a normalized bbox.
+3. **Barcodes/QR codes** — the rendered page pixmap (grayscale) is passed to pyzbar `decode`; decoded symbols become `PYZBAR` entities with decoded text and normalized bboxes derived from the polygon corners. This runs unconditionally because QR codes and barcodes are often vector graphics that don't appear in the embedded image list.
+
+All three sources return bounding boxes as normalized 0–1 fractions of page dimensions. The `source` field on each entity (`COMPREHEND`, `REKOGNITION`, or `PYZBAR`) lets the client distinguish detection origin.
 
 **Naive UTC datetimes**
 All datetimes are computed in UTC and stored timezone-naive (`datetime.now(UTC).replace(tzinfo=None)`). SQLite has no native timezone support; PostgreSQL `TIMESTAMP WITHOUT TIME ZONE` accepts naive values. The UTC convention is enforced at the application layer — no mixed-offset data enters the DB.
@@ -83,14 +90,14 @@ The scan response can be posted directly to redact — filter the `entities` arr
 ```
 POST /pdf/scan
 Body:    multipart/form-data — file (PDF, single page only)
-Returns: { "job_id": 1, "entities": [{ "entity_type", "text", "start_offset", "end_offset", "confidence", "bboxes": [{ "left", "top", "width", "height" }] }] }
+Returns: { "job_id": 1, "entities": [{ "source", "entity_type", "text", "start_offset", "end_offset", "confidence", "bboxes": [{ "left", "top", "width", "height" }] }] }
 
 POST /pdf/redact
 Body:    { "job_id": 1, "entities": [...] }   ← filtered scan response
 Returns: { "download_url": "https://..." }     ← presigned S3 URL (5 min TTL)
 ```
 
-The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. Bounding boxes are Textract normalized coordinates (0–1 fractions of page dimensions). Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour; the presigned URL gives a 5-minute download window.
+The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. `source` is `COMPREHEND`, `REKOGNITION`, or `PYZBAR`. Bounding boxes are normalized (0–1 fractions of page dimensions) regardless of detection source. Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour; the presigned URL gives a 5-minute download window.
 
 ## Quickstart
 
@@ -203,7 +210,7 @@ Subsequent `terraform apply` runs will not overwrite these values. Only required
 | `S3_BUCKET` | **Yes** | — | S3 bucket name for ephemeral PDF job storage; app will not start without it |
 | `AWS_PROFILE` | Yes† | — | Named AWS profile from `~/.aws/credentials`; provides credentials and region |
 
-†Required locally for Comprehend, Textract, and S3. Not used in production — App Runner uses the instance IAM role. Set in shell (`AWS_PROFILE=x uv run uvicorn ...`); not injected automatically from `.env`.
+†Required locally for Comprehend, Textract, Rekognition, and S3. Not used in production — App Runner uses the instance IAM role. Set in shell (`AWS_PROFILE=x uv run uvicorn ...`); not injected automatically from `.env`.
 
 ## Project Structure
 
@@ -223,9 +230,11 @@ redactcat/
 │   │   ├── text.py        # Text PII scan and redaction (stateless)
 │   │   └── users.py       # User profile (get, update, delete)
 │   └── services/
+│       ├── barcodes.py    # pyzbar QR code and barcode detection from rendered page pixmap
 │       ├── detection.py   # AWS Comprehend PII detection
 │       ├── extraction.py  # AWS Textract PDF text extraction + word bbox mapping
-│       ├── redaction.py   # Text redaction (string substitution)
+│       ├── redaction.py   # Text redaction (string substitution) and PDF redaction (PyMuPDF)
+│       ├── rekognition.py # AWS Rekognition face detection in embedded images
 │       └── storage.py     # S3 upload, download, delete, presigned URL
 ├── tests/
 │   ├── conftest.py        # Fixtures: engine, db session, TestClient
@@ -252,7 +261,7 @@ redactcat/
 3. **Redact** — user POSTs the original text and selected entities to `/text/redact`; service applies substitutions and returns the redacted string
 
 **PDF:**
-1. **Scan** — user POSTs a single-page PDF to `/pdf/scan`; service uploads to S3, extracts text and word bounding boxes via Textract, detects PII with Comprehend, maps character offsets to bboxes, returns `{ job_id, entities[] }`
+1. **Scan** — user POSTs a single-page PDF to `/pdf/scan`; service uploads to S3, then runs three detection pipelines: Textract → Comprehend (text PII with word bboxes), Rekognition (faces in embedded images), and pyzbar (barcodes/QR codes from the rendered page). Returns `{ job_id, entities[] }` where each entity carries a `source` field
 2. **Review** — client filters the entity list
 3. **Redact** — user POSTs `{ job_id, entities[] }` to `/pdf/redact`; service downloads the PDF from S3, applies PyMuPDF black-box redactions at the supplied bboxes, returns a presigned download URL (5 min TTL), then deletes the original S3 object and the Job row. Jobs expire after 1 hour (410 Gone). The redacted PDF is not deleted immediately — the bucket lifecycle rule cleans it up after the download window
 

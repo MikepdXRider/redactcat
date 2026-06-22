@@ -25,6 +25,13 @@ uv run ruff check .
 # Start dev server
 uv run uvicorn app.main:app --reload
 
+# macOS only: pyzbar requires libzbar0 (Homebrew installs to a non-standard path).
+# Install once, then prefix test and server commands with DYLD_LIBRARY_PATH:
+#   brew install zbar
+#   DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run pytest
+#   DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run uvicorn app.main:app --reload
+# Or add `export DYLD_LIBRARY_PATH=/opt/homebrew/lib` to your shell profile.
+
 # Build Docker image
 docker build -t redactcat .
 
@@ -101,6 +108,12 @@ class UserCreate(BaseModel):
 ### Services (`app/services/`)
 
 Business logic and external service calls belong in service modules, not in router handlers. Routers orchestrate; services do work. Each service file owns one integration or domain concern.
+
+**boto3 client instantiation:** two patterns exist and the choice drives how the service is stubbed in tests.
+- **Per-call** (`detection.py`): `boto3.client(...)` is created inside the function on each call. Stub by constructing a client, wrapping it in `Stubber`, and patching `app.services.<module>.boto3.client` to return it (see `tests/test_detection.py`).
+- **Module-level** (`rekognition.py`, `storage.py`): the client is created once at import time (e.g. `_rekognition = boto3.client(...)`). Stub by importing that client object and wrapping it directly in `Stubber` — no patching needed (see `tests/test_rekognition.py`).
+
+Either is acceptable; match the surrounding module and pick the stubbing approach to fit.
 
 ### Auth & `get_current_user`
 
@@ -247,8 +260,11 @@ Current patch targets:
 - `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.detect_faces` — mock in `tests/test_pdf.py` (scan endpoint, face detection)
+- `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf.py` (scan endpoint, QR/barcode detection)
 
-To test a service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
+To test an AWS service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
+
+Non-botocore service integrations have no Stubber. The barcode service wraps pyzbar, so `tests/test_barcodes.py` stubs the native boundary by patching `app.services.barcodes.decode` and runs the real bbox math against a real pixmap.
 
 ## Code Standards
 

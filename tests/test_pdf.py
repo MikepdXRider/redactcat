@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Job
 from app.schemas import BoundingBox, DetectedEntity
+from app.services.barcodes import BarcodeDetection
 from app.services.extraction import WordSpan
 from app.services.rekognition import FaceDetection
 
@@ -80,12 +81,33 @@ def _mock_face() -> list[FaceDetection]:
     ]
 
 
+def _mock_qr_code() -> list[BarcodeDetection]:
+    return [
+        BarcodeDetection(
+            entity_type="QR_CODE",
+            text="https://example.com/user/123",
+            bbox=BoundingBox(left=0.1, top=0.1, width=0.2, height=0.2),
+        )
+    ]
+
+
+def _mock_barcode() -> list[BarcodeDetection]:
+    return [
+        BarcodeDetection(
+            entity_type="BARCODE",
+            text="123456789012",
+            bbox=BoundingBox(left=0.1, top=0.1, width=0.3, height=0.05),
+        )
+    ]
+
+
 def _do_scan(client: TestClient, tokens: dict, one_page_pdf: bytes) -> dict:
     with (
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         return client.post(
             "/pdf/scan",
@@ -162,6 +184,7 @@ def test_scan_returns_entities(client: TestClient, one_page_pdf: bytes) -> None:
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -195,6 +218,7 @@ def test_scan_no_entities(client: TestClient, one_page_pdf: bytes) -> None:
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("Nothing sensitive", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -231,6 +255,7 @@ def test_scan_creates_job_in_db(client: TestClient, db: Session, one_page_pdf: b
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -256,6 +281,7 @@ def test_scan_no_images_rekognition_not_called(client: TestClient, one_page_pdf:
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("text", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces") as mock_detect_faces,
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -274,6 +300,7 @@ def test_scan_with_images_face_detected(client: TestClient, one_page_pdf_with_im
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -305,6 +332,7 @@ def test_scan_rekognition_failure_does_not_create_job(
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", side_effect=Exception("Rekognition unavailable")),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         response = client_no_raise.post(
             "/pdf/scan",
@@ -323,6 +351,7 @@ def test_scan_with_images_no_faces(client: TestClient, one_page_pdf_with_image: 
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         response = client.post(
             "/pdf/scan",
@@ -341,6 +370,7 @@ def test_redact_face_entity(client: TestClient, one_page_pdf_with_image: bytes) 
         patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
     ):
         scan = client.post(
             "/pdf/scan",
@@ -363,6 +393,173 @@ def test_redact_face_entity(client: TestClient, one_page_pdf_with_image: bytes) 
 
     assert response.status_code == 200
     assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
+
+
+# --- pyzbar barcode / QR code detection ---
+
+def test_scan_no_barcodes(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("text", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]) as mock_detect_barcodes,
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    mock_detect_barcodes.assert_called_once()
+    assert response.json()["entities"] == []
+
+
+def test_scan_qr_code_detected(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=_mock_qr_code()),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["entities"]) == 1
+
+    entity = data["entities"][0]
+    assert entity["source"] == "PYZBAR"
+    assert entity["entity_type"] == "QR_CODE"
+    assert entity["text"] == "https://example.com/user/123"
+    assert entity["confidence"] == 1.0
+    assert entity["start_offset"] == 0
+    assert entity["end_offset"] == 0
+    assert len(entity["bboxes"]) == 1
+    assert set(entity["bboxes"][0].keys()) == {"left", "top", "width", "height"}
+
+
+def test_scan_barcode_detected(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=_mock_barcode()),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["entities"]) == 1
+
+    entity = data["entities"][0]
+    assert entity["source"] == "PYZBAR"
+    assert entity["entity_type"] == "BARCODE"
+    assert entity["text"] == "123456789012"
+    assert entity["confidence"] == 1.0
+    assert len(entity["bboxes"]) == 1
+
+
+def test_redact_pyzbar_entity(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=_mock_qr_code()),
+    ):
+        scan = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        ).json()
+
+    with (
+        patch("app.routers.pdf.download_from_s3", return_value=one_page_pdf),
+        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
+        patch("app.routers.pdf.delete_from_s3"),
+    ):
+        response = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": scan["entities"]},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
+
+
+def test_redact_mixed_source_entities(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=_mock_qr_code()),
+    ):
+        scan = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        ).json()
+
+    # Scan response carries entities from two distinct sources
+    assert {e["source"] for e in scan["entities"]} == {"COMPREHEND", "PYZBAR"}
+
+    with (
+        patch("app.routers.pdf.download_from_s3", return_value=one_page_pdf),
+        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
+        patch("app.routers.pdf.delete_from_s3"),
+    ):
+        response = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": scan["entities"]},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
+
+
+def test_scan_barcode_failure_does_not_create_job(
+    client_no_raise: TestClient, db: Session, one_page_pdf: bytes
+) -> None:
+    tokens = _register(client_no_raise)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", side_effect=Exception("Pyzbar unavailable")),
+    ):
+        response = client_no_raise.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 500
+    assert db.query(Job).count() == 0
 
 
 # --- POST /pdf/redact ---
