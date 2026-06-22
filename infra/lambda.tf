@@ -8,7 +8,7 @@ resource "null_resource" "lambda_package" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      pip install psycopg2-binary \
+      pip3 install psycopg2-binary \
         --platform manylinux2014_x86_64 \
         --implementation cp \
         --python-version 3.12 \
