@@ -266,6 +266,8 @@ Current patch targets:
 - `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf.py` (scan endpoint, QR/barcode detection)
 - `app.services.usage.record_usage_event` — mock in router tests to isolate from DB; test the helper directly in `tests/test_usage.py`
 
+`app/routers/users.py` and `app/routers/usage.py` have no AWS calls and no patch targets. Tests for `/usage/*` endpoints seed `UsageEvent` rows directly via the `db` fixture in `tests/test_usage_router.py`.
+
 To test an AWS service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 
 Non-botocore service integrations have no Stubber. The barcode service wraps pyzbar, so `tests/test_barcodes.py` stubs the native boundary by patching `app.services.barcodes.decode` and runs the real bbox math against a real pixmap.

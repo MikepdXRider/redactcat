@@ -119,9 +119,38 @@ def test_scan_records_comprehend_usage_event(client: TestClient, db: Session) ->
     assert len(events) == 1
     ev = events[0]
     assert ev.input_type == "TEXT"
-    assert ev.quantity == len(text)
-    assert ev.token_cost == len(text)  # 1 token per character
+    assert ev.quantity == 300  # 300-char minimum — "John Doe lives here" is 19 chars
+    assert ev.token_cost == 300
     assert ev.job_id is None
+
+
+def test_scan_records_comprehend_min_300_chars(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        client.post(
+            "/text/scan",
+            json={"text": "Hi"},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    db.expire_all()
+    ev = db.scalars(select(UsageEvent).where(UsageEvent.event_type == "COMPREHEND_CHAR")).one()
+    assert ev.quantity == 300
+    assert ev.token_cost == 300
+
+
+def test_scan_records_comprehend_actual_quantity_above_minimum(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    long_text = "x" * 500
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        client.post(
+            "/text/scan",
+            json={"text": long_text},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    db.expire_all()
+    ev = db.scalars(select(UsageEvent).where(UsageEvent.event_type == "COMPREHEND_CHAR")).one()
+    assert ev.quantity == 500
+    assert ev.token_cost == 500
 
 
 # --- POST /text/redact ---

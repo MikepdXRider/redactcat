@@ -6,7 +6,7 @@ return 401 not 422). Shared validation constants (e.g. PASSWORD_MIN_LENGTH) are
 defined once here and referenced by name.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -28,6 +28,23 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+
+class UsageRead(BaseModel):
+    tokens_used: int
+    reset_date: date
+
+
+class UsageEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    event_type: str
+    input_type: str
+    quantity: int
+    token_cost: int
+    job_id: int | None
+    created_at: datetime
 
 
 class UserRead(BaseModel):

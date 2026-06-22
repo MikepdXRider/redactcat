@@ -126,7 +126,7 @@ def scan_pdf(
     db.refresh(job)
 
     record_usage_event(db, current_user.id, EventType.TEXTRACT_PAGE, InputType.PDF, quantity=1, job_id=job.id)
-    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.PDF, quantity=len(text), job_id=job.id)
+    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.PDF, quantity=max(len(text), 300), job_id=job.id)
     if page_image_bytes:
         record_usage_event(db, current_user.id, EventType.REKOGNITION_FACE, InputType.PDF, quantity=1, job_id=job.id)
 

@@ -28,7 +28,7 @@ def scan_text(
     current_user: User = Depends(get_current_user),
 ) -> TextScanRead:
     entities = detect_pii_entities(body.text)
-    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.TEXT, quantity=len(body.text))
+    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.TEXT, quantity=max(len(body.text), 300))
     return TextScanRead(text=body.text, entities=entities)
 
 

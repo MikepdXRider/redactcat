@@ -758,8 +758,8 @@ def test_scan_records_textract_and_comprehend_events(client: TestClient, db: Ses
     assert "COMPREHEND_CHAR" in events
     cc = events["COMPREHEND_CHAR"]
     assert cc.input_type == "PDF"
-    assert cc.quantity == len(text)
-    assert cc.token_cost == len(text)
+    assert cc.quantity == 300  # 300-char minimum — "John Doe lives" is 14 chars
+    assert cc.token_cost == 300
     assert cc.job_id == job_id
 
 

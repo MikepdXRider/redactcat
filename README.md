@@ -64,6 +64,8 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | POST | /auth/logout | ✓ | Delete refresh token row; invalidates session |
 | POST | /auth/refresh | — | Rotate refresh token; returns new token pair |
 | GET | /users/me | ✓ | Get current user profile |
+| GET | /usage/summary | ✓ | Token usage for the current calendar month and next reset date |
+| GET | /usage/history | ✓ | All usage events for the current calendar month, newest first |
 | PATCH | /users/me | ✓ | Update email or password |
 | DELETE | /users/me | ✓ | Delete account and all active sessions |
 | POST | /text/scan | ✓ | Detect PII entities in text; returns source text + entity list |
@@ -233,6 +235,7 @@ redactcat/
 │   │   ├── health.py      # Health check
 │   │   ├── pdf.py         # PDF PII scan and redaction (stateful, S3-backed)
 │   │   ├── text.py        # Text PII scan and redaction (stateless)
+│   │   ├── usage.py       # /usage/summary and /usage/history — current-month token reporting
 │   │   └── users.py       # User profile (get, update, delete)
 │   └── services/
 │       ├── barcodes.py    # pyzbar QR code and barcode detection from rendered page pixmap
@@ -253,6 +256,7 @@ redactcat/
 │   ├── test_rekognition.py # Rekognition service unit tests (botocore Stubber)
 │   ├── test_text.py       # /text/scan and /text/redact endpoint tests
 │   ├── test_usage.py      # Usage event recording service unit tests
+│   ├── test_usage_router.py # /usage/summary and /usage/history endpoint tests
 │   └── test_users.py      # User profile endpoint tests
 ├── infra/                 # Terraform — ECR, App Runner, S3, IAM, SSM, Route 53
 ├── .github/workflows/
