@@ -37,7 +37,7 @@ def detect_barcodes(pix: fitz.Pixmap) -> list[BarcodeDetection]:
         left = code.rect.left
         top = code.rect.top
         width = code.rect.width
-        height - code.rect.height
+        height = code.rect.height
         
         if code.polygon:
             # use polygon if available
