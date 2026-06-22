@@ -264,7 +264,7 @@ Current patch targets:
 - `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf_router.py` (redact endpoint)
 - `app.routers.pdf.detect_faces` — mock in `tests/test_pdf_router.py` (scan endpoint, face detection)
 - `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf_router.py` (scan endpoint, QR/barcode detection)
-- `app.services.usage.record_usage_event` — mock in router tests to isolate from DB; test the helper directly in `tests/test_usage_service.py`
+- `app.services.usage.record_usage_event` — do not mock in router tests; let it write real rows and assert via the `db` fixture. Test the helper in isolation in `tests/test_usage_service.py`.
 
 `app/routers/users.py` and `app/routers/usage.py` have no AWS calls and no patch targets. Tests for `/usage/*` endpoints seed `UsageEvent` rows directly via the `db` fixture in `tests/test_usage_router.py`.
 

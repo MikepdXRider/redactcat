@@ -35,6 +35,7 @@ def record_usage_event(
     quantity: int,
     job_id: int | None = None,
 ) -> None:
+    # Must be called after the caller's own db.commit() — rollback here only affects this insert.
     try:
         db.add(
             UsageEvent(
