@@ -18,6 +18,10 @@ class Settings(BaseSettings):
 
     S3_BUCKET: str
 
+    # EventBridge Scheduler — injected by Terraform; empty in local dev (scheduling is best-effort)
+    EXPIRE_JOB_LAMBDA_ARN: str = ""
+    SCHEDULER_EXECUTION_ROLE_ARN: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

@@ -3,27 +3,30 @@
 Stateful PII scan and redact for single-page PDFs. The original PDF is stored
 ephemerally in S3; entity bounding boxes travel in HTTP payloads rather than the DB.
 
-Flow: POST /pdf/scan uploads the PDF to S3, runs Textract + Comprehend, maps character
-offsets to word-level bboxes, and returns them to the client. If the page contains
-embedded images, Rekognition detect_faces is also called and FACE entities are appended.
-pyzbar is always called to detect QR codes and barcodes (which may be vector graphics
-rather than embedded images). The Job row is created only after all calls succeed — if
-any raises, there is no orphaned DB row (the S3 object is cleaned up by the bucket
-lifecycle rule). POST /pdf/redact atomically claims the Job row via DELETE RETURNING
-(filtered by both PK and user_id), commits immediately so concurrent callers see the
-deletion, then applies redactions and returns a presigned URL.
+Flow: POST /pdf/scan uploads the PDF to S3, schedules a one-time EventBridge cleanup
+Lambda ~1 hour out, then runs Textract + Comprehend, maps character offsets to
+word-level bboxes, and returns them to the client along with an expires_at timestamp.
+If the page contains embedded images, Rekognition detect_faces is also called and FACE
+entities are appended. pyzbar is always called to detect QR codes and barcodes.
 
-Jobs expire after 1 hour. If the job is too old or the original S3 object is gone when
-redact is called, we return 410 Gone and clean up any remaining S3 objects.
+POST /pdf/redact is a pure redaction call — it does not delete the Job row or the
+original S3 object. Multiple redact calls on the same job produce distinct output files
+(unique S3 key per call) so all presigned URLs remain valid within the TTL window. The
+Lambda owns all cleanup: it deletes every object under the job prefix and the DB row
+~1 hour after the scan.
+
+If the job is too old or the original S3 object is gone when redact is called, we return
+410 Gone. The Job row and any remaining S3 objects are eventually cleaned up by the
+Lambda or the bucket lifecycle rule.
 """
 
+import logging
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import fitz
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -45,15 +48,16 @@ from app.services.detection import detect_pii_entities
 from app.services.extraction import WordSpan, extract_text_from_pdf_s3
 from app.services.redaction import apply_pdf_redactions
 from app.services.rekognition import detect_faces
-from app.services.storage import delete_from_s3, download_from_s3, generate_presigned_url, upload_to_s3
+from app.services.scheduler import JOB_TTL, schedule_job_expiry
+from app.services.storage import download_from_s3, generate_presigned_url, upload_to_s3
 from app.services.usage import COMPREHEND_MIN_CHARS, record_usage_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["pdf"])
 
-_JOB_TTL = timedelta(hours=1)
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 _ORIGINAL_FILENAME = "original.pdf"
-_REDACTED_FILENAME = "redacted.pdf"
 
 
 def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list[BoundingBox]:
@@ -62,16 +66,6 @@ def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list
         for ws in word_spans
         if ws.start_char < end and ws.end_char > start
     ]
-
-
-def _expire_job(bucket: str, original_key: str) -> None:
-    # Best-effort S3 cleanup for expired or missing jobs. DB row is already gone.
-    redacted_key = original_key.rsplit("/", 1)[0] + f"/{_REDACTED_FILENAME}"
-    for key in [original_key, redacted_key]:
-        try:
-            delete_from_s3(bucket, key)
-        except ClientError:
-            pass
 
 
 @router.post("/scan", response_model=PdfScanRead, status_code=status.HTTP_200_OK)
@@ -113,8 +107,16 @@ def scan_pdf(
     s3_key = f"pdfs/{current_user.id}/{secrets.token_urlsafe(16)}/{_ORIGINAL_FILENAME}"
     upload_to_s3(pdf_bytes, settings.S3_BUCKET, s3_key)
 
-    # Job row is created only after all calls succeed. If any raises,
-    # the S3 object is orphaned but the lifecycle rule cleans it up — no DB leak.
+    # Schedule Lambda cleanup ~1 hour out. Best-effort: a failure here must not fail the scan.
+    # The S3 lifecycle rule (1-day expiration) is the fallback.
+    try:
+        schedule_job_expiry(s3_key)
+    except Exception:
+        logger.warning("failed to schedule job expiry for token=%s", s3_key.split("/")[2])
+
+    # Job row is created only after all calls succeed. If any raises, the S3 object is
+    # orphaned — the Lambda cleans it up if scheduling succeeded; the lifecycle rule (1-day)
+    # is the fallback if scheduling failed.
     text, word_spans = extract_text_from_pdf_s3(settings.S3_BUCKET, s3_key)
     raw_entities = detect_pii_entities(text)
     face_detections = detect_faces(page_image_bytes) if page_image_bytes else []
@@ -167,7 +169,11 @@ def scan_pdf(
         for b in barcode_detections
     ]
 
-    return PdfScanRead(job_id=job.id, entities=text_entities + face_entities + barcode_entities)
+    return PdfScanRead(
+        job_id=job.id,
+        entities=text_entities + face_entities + barcode_entities,
+        expires_at=job.created_at + JOB_TTL,
+    )
 
 
 @router.post("/redact", response_model=PdfRedactRead, status_code=status.HTTP_200_OK)
@@ -176,47 +182,29 @@ def redact_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PdfRedactRead:
-    # Atomically claim the job: DELETE WHERE pk AND user_id so only one concurrent
-    # caller wins. Returning raw columns (not the ORM class) avoids SQLAlchemy
-    # trying to track the already-deleted instance during commit.
-    stmt = (
-        delete(Job)
-        .where(Job.id == body.job_id, Job.user_id == current_user.id)
-        .returning(Job.original_s3_key, Job.created_at)
-    )
-    row = db.execute(stmt).first()
-    if not row:
+    job = db.get(Job, body.job_id)
+    if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    original_s3_key, created_at = row.original_s3_key, row.created_at
-
-    # Commit immediately so concurrent callers see the deletion.
-    db.commit()
-
-    if datetime.now(UTC).replace(tzinfo=None) - created_at > _JOB_TTL:
-        _expire_job(settings.S3_BUCKET, original_s3_key)
+    if datetime.now(UTC).replace(tzinfo=None) - job.created_at > JOB_TTL:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Job expired")
 
     try:
-        pdf_bytes = download_from_s3(settings.S3_BUCKET, original_s3_key)
+        pdf_bytes = download_from_s3(settings.S3_BUCKET, job.original_s3_key)
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "NoSuchKey":
-            _expire_job(settings.S3_BUCKET, original_s3_key)
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="Job expired") from exc
-        raise
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Storage error") from exc
 
     redacted_bytes = apply_pdf_redactions(pdf_bytes, body.entities)
 
-    redacted_key = original_s3_key.rsplit("/", 1)[0] + f"/{_REDACTED_FILENAME}"
+    # Unique key per call so multiple redacted versions can coexist within the TTL window.
+    redacted_key = job.original_s3_key.rsplit("/", 1)[0] + f"/redacted_{secrets.token_urlsafe(8)}.pdf"
     upload_to_s3(redacted_bytes, settings.S3_BUCKET, redacted_key)
-
     download_url = generate_presigned_url(settings.S3_BUCKET, redacted_key)
 
-    # Delete the original only — the redacted file must remain until the user downloads it.
-    # The S3 lifecycle rule (1-day expiration) cleans up the redacted object.
-    delete_from_s3(settings.S3_BUCKET, original_s3_key)
-
-    # Job row is already deleted, but the plain-int job_id survives — preserved for client grouping.
+    # Job row and original S3 object are intentionally left intact — the Lambda cleans
+    # up the entire job prefix at expiry, and the user may call redact again.
     record_usage_event(db, current_user.id, EventType.PDF_REDACTION, InputType.PDF, quantity=1, job_id=body.job_id)
 
-    return PdfRedactRead(download_url=download_url)
+    return PdfRedactRead(download_url=download_url, expires_at=job.created_at + JOB_TTL)

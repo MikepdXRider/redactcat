@@ -104,7 +104,43 @@ resource "aws_iam_role_policy" "apprunner_instance" {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter", "ssm:GetParameters"]
         Resource = "arn:aws:ssm:${var.region}:*:parameter/${var.app_name}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["scheduler:CreateSchedule"]
+        Resource = "arn:aws:scheduler:${var.region}:${data.aws_caller_identity.current.account_id}:schedule/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = aws_iam_role.scheduler_execution.arn
       }
     ]
+  })
+}
+
+# Role that EventBridge Scheduler assumes to invoke the expire_job Lambda.
+resource "aws_iam_role" "scheduler_execution" {
+  name = "${var.app_name}-scheduler-execution"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "scheduler.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "scheduler_execution" {
+  name = "${var.app_name}-scheduler-execution"
+  role = aws_iam_role.scheduler_execution.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["lambda:InvokeFunction"]
+      Resource = aws_lambda_function.expire_job.arn
+    }]
   })
 }

@@ -175,24 +175,24 @@ Text passes through in-memory — no PII is written to the database or S3 at any
 
 The scan response shape matches the redact request body exactly, so the client can POST the scan response directly to redact without reshaping. `replacement` defaults to `"[REDACTED]"`; empty string deletes PII.
 
-PDF is a separate stateful flow (`/pdf/*`) backed by S3 ephemeral storage:
+PDF is a separate stateful flow (`/pdf/*`) backed by S3 ephemeral storage. A Job is a 1-hour session window — scan once, redact as many versions as needed within the TTL:
 
-1. `POST /pdf/scan` — validates single-page PDF, uploads to S3, extracts text via Textract, detects PII with Comprehend, maps character offsets to word-level bboxes, returns `{ job_id, entities[] }` with bboxes embedded
+1. `POST /pdf/scan` — validates single-page PDF, uploads to S3, schedules a one-time EventBridge Scheduler Lambda ~1 hour out, extracts text via Textract, detects PII with Comprehend, maps character offsets to word-level bboxes, returns `{ job_id, entities[], expires_at }` with bboxes embedded. Scheduling is best-effort; if it fails, the scan still succeeds and the S3 lifecycle rule is the fallback.
 2. Client filters entities
-3. `POST /pdf/redact` — accepts the filtered scan response, atomically claims the Job row via `DELETE RETURNING`, applies PyMuPDF redactions, returns a presigned download URL (5 min TTL), deletes the original S3 object and the Job row. Jobs expire after 1 hour; expired jobs or missing S3 objects return 410. The redacted PDF remains in S3 for download; the bucket lifecycle rule cleans it up.
+3. `POST /pdf/redact` — checks job ownership (404) and TTL (410), applies PyMuPDF redactions, uploads to a unique key `redacted_{token}.pdf` within the job prefix, returns `{ download_url, expires_at }`. Does **not** delete the Job row or original S3 object — multiple redact calls on the same job produce distinct output files that coexist under the prefix. Lambda owns all cleanup at expiry.
+
+The Lambda fires at `job.created_at + JOB_TTL`, deletes every S3 object under the job prefix (original + all redacted versions), and deletes the Job row. Orphaned S3 objects (where the Job row was never committed) are also cleaned up because the Lambda is scheduled immediately after `upload_to_s3()` succeeds, before any downstream call can fail.
 
 Only the `Job` row (job_id, user_id, original_s3_key) and source PDF persist between calls. Entity data and bboxes travel in HTTP payloads — no PII is written to the DB.
 
 ### Ephemeral Storage (S3)
 
-At the end of `POST /pdf/redact`:
-1. Upload redacted PDF to S3
-2. Generate a short-TTL presigned S3 URL (5 min)
-3. Delete the original S3 object (no longer needed)
-4. Delete the Job row
-5. Return the presigned URL
+All S3 cleanup is handled by the per-job Lambda, which fires ~1 hour after scan:
+1. Lists all objects under the job prefix (`pdfs/{user_id}/{token}/`)
+2. Deletes each object (original PDF + all redacted versions)
+3. Deletes the Job DB row
 
-The redacted file is not deleted immediately — it must remain accessible until the user downloads it via the presigned URL. The S3 bucket lifecycle rule (1-day expiration) handles cleanup.
+The S3 bucket lifecycle rule (1-day expiration) is a fallback for any objects the Lambda misses.
 
 ### SQLite FK Enforcement
 
@@ -259,11 +259,11 @@ Current patch targets:
 - `app.routers.pdf.extract_text_from_pdf_s3` — mock in `tests/test_pdf_router.py` to return controlled Textract output
 - `app.routers.pdf.detect_pii_entities` — mock in `tests/test_pdf_router.py` to control Comprehend output
 - `app.routers.pdf.download_from_s3` — mock in `tests/test_pdf_router.py` (redact endpoint)
-- `app.routers.pdf.delete_from_s3` — mock in `tests/test_pdf_router.py` (redact endpoint)
 - `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf_router.py` (redact endpoint)
 - `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf_router.py` (redact endpoint)
 - `app.routers.pdf.detect_faces` — mock in `tests/test_pdf_router.py` (scan endpoint, face detection)
 - `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf_router.py` (scan endpoint, QR/barcode detection)
+- `app.routers.pdf.schedule_job_expiry` — mocked via autouse fixture in `tests/test_pdf_router.py`; individual tests that assert call args patch it explicitly at test level
 - `app.services.usage.record_usage_event` — do not mock in router tests; let it write real rows and assert via the `db` fixture. Test the helper in isolation in `tests/test_usage_service.py`.
 
 `app/routers/users.py` and `app/routers/usage.py` have no AWS calls and no patch targets. Tests for `/usage/*` endpoints seed `UsageEvent` rows directly via the `db` fixture in `tests/test_usage_router.py`.

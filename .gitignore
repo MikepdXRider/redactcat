@@ -12,3 +12,5 @@ dist/
 .claude/sessions
 .DS_Store
 claude-artifacts/
+infra/lambda/vendor/
+infra/lambda/expire_jobs.zip
