@@ -30,6 +30,8 @@ def get_usage_summary(
     current_user: User = Depends(get_current_user),
 ) -> UsageRead:
     cutoff = _billing_month_start()
+    # coalesce handles SQL NULL (SUM of zero rows); or 0 satisfies mypy since
+    # db.scalar() is typed as int | None regardless of the query expression.
     tokens_used: int = db.scalar(
         select(func.coalesce(func.sum(UsageEvent.token_cost), 0))
         .where(UsageEvent.user_id == current_user.id, UsageEvent.created_at >= cutoff)
