@@ -254,20 +254,23 @@ Before writing tests for any new endpoint, invoke the `api-testing` skill (`/api
 When adding tests for endpoints that call AWS services, mock at the service-function level using `unittest.mock.patch`. Add the specific patch targets here as each service is built.
 
 Current patch targets:
-- `app.routers.text.detect_pii_entities` — mock in `tests/test_text.py` to control Comprehend output without a real AWS call
-- `app.routers.pdf.upload_to_s3` — mock in `tests/test_pdf.py` to skip real S3 upload
-- `app.routers.pdf.extract_text_from_pdf_s3` — mock in `tests/test_pdf.py` to return controlled Textract output
-- `app.routers.pdf.detect_pii_entities` — mock in `tests/test_pdf.py` to control Comprehend output
-- `app.routers.pdf.download_from_s3` — mock in `tests/test_pdf.py` (redact endpoint)
-- `app.routers.pdf.delete_from_s3` — mock in `tests/test_pdf.py` (redact endpoint)
-- `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf.py` (redact endpoint)
-- `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf.py` (redact endpoint)
-- `app.routers.pdf.detect_faces` — mock in `tests/test_pdf.py` (scan endpoint, face detection)
-- `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf.py` (scan endpoint, QR/barcode detection)
+- `app.routers.text.detect_pii_entities` — mock in `tests/test_text_router.py` to control Comprehend output without a real AWS call
+- `app.routers.pdf.upload_to_s3` — mock in `tests/test_pdf_router.py` to skip real S3 upload
+- `app.routers.pdf.extract_text_from_pdf_s3` — mock in `tests/test_pdf_router.py` to return controlled Textract output
+- `app.routers.pdf.detect_pii_entities` — mock in `tests/test_pdf_router.py` to control Comprehend output
+- `app.routers.pdf.download_from_s3` — mock in `tests/test_pdf_router.py` (redact endpoint)
+- `app.routers.pdf.delete_from_s3` — mock in `tests/test_pdf_router.py` (redact endpoint)
+- `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf_router.py` (redact endpoint)
+- `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf_router.py` (redact endpoint)
+- `app.routers.pdf.detect_faces` — mock in `tests/test_pdf_router.py` (scan endpoint, face detection)
+- `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf_router.py` (scan endpoint, QR/barcode detection)
+- `app.services.usage.record_usage_event` — do not mock in router tests; let it write real rows and assert via the `db` fixture. Test the helper in isolation in `tests/test_usage_service.py`.
 
-To test an AWS service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
+`app/routers/users.py` and `app/routers/usage.py` have no AWS calls and no patch targets. Tests for `/usage/*` endpoints seed `UsageEvent` rows directly via the `db` fixture in `tests/test_usage_router.py`.
 
-Non-botocore service integrations have no Stubber. The barcode service wraps pyzbar, so `tests/test_barcodes.py` stubs the native boundary by patching `app.services.barcodes.decode` and runs the real bbox math against a real pixmap.
+To test an AWS service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection_service.py` for the pattern.
+
+Non-botocore service integrations have no Stubber. The barcode service wraps pyzbar, so `tests/test_barcodes_service.py` stubs the native boundary by patching `app.services.barcodes.decode` and runs the real bbox math against a real pixmap.
 
 ## Code Standards
 
@@ -318,7 +321,7 @@ Before committing, explicitly state the answers to these five questions and wait
 1. **What could go wrong with this?** — at least one weakness or risk
 2. **What did I assume?** — anything that could break under different conditions
 3. **Does CLAUDE.md need an update?** — if a decision or pattern was established, document it
-4. **Does the README need an update?** — if the public-facing setup or structure changed
+4. **Does the README need an update?** — check every section that could be affected: Project Structure (new files in `app/` or `tests/`), API Reference (new or changed endpoints), Architecture Decisions (new patterns), Environment Variables (new vars), and How It Works (changed flows). Update before committing, not as a follow-up.
 5. **Is test coverage complete?** — for each new endpoint: auth enforcement, input validation, cross-user isolation (if applicable), exact response shape, and any DB-side effects not surfaced by HTTP. Name any gaps.
 
 ## What Not To Do

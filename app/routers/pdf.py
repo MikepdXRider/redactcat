@@ -33,6 +33,8 @@ from app.models import Job, User
 from app.schemas import (
     BoundingBox,
     EntitySource,
+    EventType,
+    InputType,
     PdfEntityRead,
     PdfRedactRead,
     PdfRedactRequest,
@@ -44,6 +46,7 @@ from app.services.extraction import WordSpan, extract_text_from_pdf_s3
 from app.services.redaction import apply_pdf_redactions
 from app.services.rekognition import detect_faces
 from app.services.storage import delete_from_s3, download_from_s3, generate_presigned_url, upload_to_s3
+from app.services.usage import COMPREHEND_MIN_CHARS, record_usage_event
 
 router = APIRouter(tags=["pdf"])
 
@@ -121,6 +124,11 @@ def scan_pdf(
     db.add(job)
     db.commit()
     db.refresh(job)
+
+    record_usage_event(db, current_user.id, EventType.TEXTRACT_PAGE, InputType.PDF, quantity=1, job_id=job.id)
+    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.PDF, quantity=max(len(text), COMPREHEND_MIN_CHARS), job_id=job.id)
+    if page_image_bytes:
+        record_usage_event(db, current_user.id, EventType.REKOGNITION_FACE, InputType.PDF, quantity=1, job_id=job.id)
 
     text_entities = [
         PdfEntityRead(
@@ -207,5 +215,8 @@ def redact_pdf(
     # Delete the original only — the redacted file must remain until the user downloads it.
     # The S3 lifecycle rule (1-day expiration) cleans up the redacted object.
     delete_from_s3(settings.S3_BUCKET, original_s3_key)
+
+    # Job row is already deleted, but the plain-int job_id survives — preserved for client grouping.
+    record_usage_event(db, current_user.id, EventType.PDF_REDACTION, InputType.PDF, quantity=1, job_id=body.job_id)
 
     return PdfRedactRead(download_url=download_url)

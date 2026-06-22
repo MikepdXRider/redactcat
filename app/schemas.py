@@ -6,7 +6,7 @@ return 401 not 422). Shared validation constants (e.g. PASSWORD_MIN_LENGTH) are
 defined once here and referenced by name.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -28,6 +28,38 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+
+# StrEnum members compare and serialize as their string value, so the wire
+# representation is identical to str — no migration or response shape change.
+class EventType(StrEnum):
+    TEXTRACT_PAGE = "TEXTRACT_PAGE"
+    COMPREHEND_CHAR = "COMPREHEND_CHAR"
+    REKOGNITION_FACE = "REKOGNITION_FACE"
+    PDF_REDACTION = "PDF_REDACTION"
+    TEXT_REDACTION = "TEXT_REDACTION"
+
+
+class InputType(StrEnum):
+    PDF = "PDF"
+    TEXT = "TEXT"
+
+
+class UsageRead(BaseModel):
+    tokens_used: int
+    reset_date: date
+
+
+class UsageEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    event_type: EventType
+    input_type: InputType
+    quantity: int
+    token_cost: int
+    job_id: int | None
+    created_at: datetime
 
 
 class UserRead(BaseModel):

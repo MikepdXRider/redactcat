@@ -64,11 +64,13 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | POST | /auth/logout | ✓ | Delete refresh token row; invalidates session |
 | POST | /auth/refresh | — | Rotate refresh token; returns new token pair |
 | GET | /users/me | ✓ | Get current user profile |
+| GET | /usage/summary | ✓ | Token usage for the current calendar month and next reset date |
+| GET | /usage/history | ✓ | All usage events for the current calendar month, newest first |
 | PATCH | /users/me | ✓ | Update email or password |
 | DELETE | /users/me | ✓ | Delete account and all active sessions |
 | POST | /text/scan | ✓ | Detect PII entities in text; returns source text + entity list |
 | POST | /text/redact | ✓ | Apply redactions to text; returns redacted string |
-| POST | /pdf/scan | ✓ | Upload single-page PDF, detect PII; returns job_id + entities with bboxes |
+| POST | /pdf/scan | ✓ | Upload single-page PDF; runs Textract (text PII), Rekognition (faces), and pyzbar (barcodes/QR); returns job_id + entities with bboxes |
 | POST | /pdf/redact | ✓ | Apply redactions to PDF; returns presigned download URL, deletes job |
 
 Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
@@ -233,6 +235,7 @@ redactcat/
 │   │   ├── health.py      # Health check
 │   │   ├── pdf.py         # PDF PII scan and redaction (stateful, S3-backed)
 │   │   ├── text.py        # Text PII scan and redaction (stateless)
+│   │   ├── usage.py       # /usage/summary and /usage/history — current-month token reporting
 │   │   └── users.py       # User profile (get, update, delete)
 │   └── services/
 │       ├── barcodes.py    # pyzbar QR code and barcode detection from rendered page pixmap
@@ -240,16 +243,21 @@ redactcat/
 │       ├── extraction.py  # AWS Textract PDF text extraction + word bbox mapping
 │       ├── redaction.py   # Text redaction (string substitution) and PDF redaction (PyMuPDF)
 │       ├── rekognition.py # AWS Rekognition face detection in embedded images
-│       └── storage.py     # S3 upload, download, delete, presigned URL
+│       ├── storage.py     # S3 upload, download, delete, presigned URL
+│       └── usage.py       # Usage event recording — token costs per AWS call, best-effort DB insert
 ├── tests/
-│   ├── conftest.py        # Fixtures: engine, db session, TestClient
-│   ├── test_auth.py       # Auth endpoint tests
-│   ├── test_detection.py  # Comprehend service unit tests (botocore Stubber)
-│   ├── test_health.py     # Health check test
-│   ├── test_migrations.py # Alembic upgrade/downgrade integration tests
-│   ├── test_pdf.py        # /pdf/scan and /pdf/redact endpoint tests
-│   ├── test_text.py       # /text/scan and /text/redact endpoint tests
-│   └── test_users.py      # User profile endpoint tests
+│   ├── conftest.py              # Fixtures: engine, db session, TestClient
+│   ├── test_auth_router.py      # Auth endpoint tests
+│   ├── test_barcodes_service.py # pyzbar barcode service unit tests
+│   ├── test_detection_service.py # Comprehend service unit tests (botocore Stubber)
+│   ├── test_health_router.py    # Health check test
+│   ├── test_migrations.py       # Alembic upgrade/downgrade integration tests
+│   ├── test_pdf_router.py       # /pdf/scan and /pdf/redact endpoint tests
+│   ├── test_rekognition_service.py # Rekognition service unit tests (botocore Stubber)
+│   ├── test_text_router.py      # /text/scan and /text/redact endpoint tests
+│   ├── test_usage_router.py     # /usage/summary and /usage/history endpoint tests
+│   ├── test_usage_service.py    # Usage event recording service unit tests
+│   └── test_users_router.py     # User profile endpoint tests
 ├── infra/                 # Terraform — ECR, App Runner, S3, IAM, SSM, Route 53
 ├── .github/workflows/
 │   ├── ci.yml             # Lint + test on pull requests

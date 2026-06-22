@@ -6,9 +6,10 @@ import fitz
 import pytest
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Job
+from app.models import Job, UsageEvent
 from app.schemas import BoundingBox, DetectedEntity
 from app.services.barcodes import BarcodeDetection
 from app.services.extraction import WordSpan
@@ -112,6 +113,21 @@ def _do_scan(client: TestClient, tokens: dict, one_page_pdf: bytes) -> dict:
         return client.post(
             "/pdf/scan",
             files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        ).json()
+
+
+def _do_redact(client: TestClient, tokens: dict, scan: dict, pdf_bytes: bytes) -> dict:
+    with (
+        patch("app.routers.pdf.download_from_s3", return_value=pdf_bytes),
+        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
+        patch("app.routers.pdf.delete_from_s3"),
+    ):
+        return client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": scan["entities"]},
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
         ).json()
 
@@ -707,3 +723,108 @@ def test_redact_s3_not_found_returns_410(client: TestClient, db: Session, one_pa
     assert response.status_code == 410
     db.expire_all()
     assert db.get(Job, job_id) is None
+
+
+# --- Usage event recording ---
+
+def test_scan_records_textract_and_comprehend_events(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    text = "John Doe lives"
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=(text, _mock_word_spans())),
+        patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    db.expire_all()
+    events = {ev.event_type: ev for ev in db.scalars(select(UsageEvent)).all()}
+
+    assert "TEXTRACT_PAGE" in events
+    tp = events["TEXTRACT_PAGE"]
+    assert tp.input_type == "PDF"
+    assert tp.quantity == 1
+    assert tp.token_cost == 1500
+    assert tp.job_id == job_id
+
+    assert "COMPREHEND_CHAR" in events
+    cc = events["COMPREHEND_CHAR"]
+    assert cc.input_type == "PDF"
+    assert cc.quantity == 300  # 300-char minimum — "John Doe lives" is 14 chars
+    assert cc.token_cost == 300
+    assert cc.job_id == job_id
+
+
+def test_scan_records_rekognition_event_when_images_present(
+    client: TestClient, db: Session, one_page_pdf_with_image: bytes
+) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf_with_image, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    db.expire_all()
+    events = db.scalars(select(UsageEvent).where(UsageEvent.event_type == "REKOGNITION_FACE")).all()
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.input_type == "PDF"
+    assert ev.quantity == 1
+    assert ev.token_cost == 1000
+    assert ev.job_id == job_id
+
+
+def test_scan_no_rekognition_event_without_images(
+    client: TestClient, db: Session, one_page_pdf: bytes
+) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+    ):
+        client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    db.expire_all()
+    rekog_events = db.scalars(select(UsageEvent).where(UsageEvent.event_type == "REKOGNITION_FACE")).all()
+    assert rekog_events == []
+
+
+def test_redact_records_pdf_redaction_event(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    scan = _do_scan(client, tokens, one_page_pdf)
+    _do_redact(client, tokens, scan, one_page_pdf)
+
+    db.expire_all()
+    events = db.scalars(select(UsageEvent).where(UsageEvent.event_type == "PDF_REDACTION")).all()
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.input_type == "PDF"
+    assert ev.quantity == 1
+    assert ev.token_cost == 0
+    # Job row is deleted, but the plain-int job_id is preserved for client grouping
+    assert ev.job_id == scan["job_id"]
