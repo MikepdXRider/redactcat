@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -43,5 +44,4 @@ def test_schedule_name_uses_token_segment():
 
 
 def test_job_ttl_is_one_hour():
-    from datetime import timedelta
     assert JOB_TTL == timedelta(hours=1)

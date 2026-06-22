@@ -114,8 +114,9 @@ def scan_pdf(
     except Exception:
         logger.warning("failed to schedule job expiry for token=%s", s3_key.split("/")[2])
 
-    # Job row is created only after all calls succeed. If any raises,
-    # the S3 object is orphaned but the Lambda and lifecycle rule clean it up — no DB leak.
+    # Job row is created only after all calls succeed. If any raises, the S3 object is
+    # orphaned — the Lambda cleans it up if scheduling succeeded; the lifecycle rule (1-day)
+    # is the fallback if scheduling failed.
     text, word_spans = extract_text_from_pdf_s3(settings.S3_BUCKET, s3_key)
     raw_entities = detect_pii_entities(text)
     face_detections = detect_faces(page_image_bytes) if page_image_bytes else []
@@ -193,7 +194,7 @@ def redact_pdf(
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "NoSuchKey":
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="Job expired") from exc
-        raise
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Storage error") from exc
 
     redacted_bytes = apply_pdf_redactions(pdf_bytes, body.entities)
 

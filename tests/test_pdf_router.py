@@ -708,6 +708,22 @@ def test_redact_s3_not_found_returns_410(client: TestClient, db: Session, one_pa
     assert db.get(Job, job_id) is not None
 
 
+def test_redact_unexpected_s3_error_returns_500(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    scan = _do_scan(client, tokens, one_page_pdf)
+
+    unexpected = ClientError({"Error": {"Code": "InternalError", "Message": "oops"}}, "GetObject")
+
+    with patch("app.routers.pdf.download_from_s3", side_effect=unexpected):
+        response = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": []},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 500
+
+
 # --- Usage event recording ---
 
 def test_scan_records_textract_and_comprehend_events(client: TestClient, db: Session, one_page_pdf: bytes) -> None:

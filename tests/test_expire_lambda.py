@@ -119,3 +119,12 @@ def test_page_with_no_contents_key(mock_s3, mock_ssm, mock_psycopg2):
     handler({"s3_key": S3_KEY}, None)
 
     mock_s3.delete_object.assert_not_called()
+
+
+def test_s3_list_error_propagates(mock_s3, mock_ssm, mock_psycopg2):
+    mock_s3.get_paginator.return_value.paginate.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": ""}}, "ListObjectsV2"
+    )
+
+    with pytest.raises(ClientError):
+        handler({"s3_key": S3_KEY}, None)
