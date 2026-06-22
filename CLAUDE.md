@@ -264,6 +264,7 @@ Current patch targets:
 - `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.detect_faces` — mock in `tests/test_pdf.py` (scan endpoint, face detection)
 - `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf.py` (scan endpoint, QR/barcode detection)
+- `app.services.usage.record_usage_event` — mock in router tests to isolate from DB; test the helper directly in `tests/test_usage.py`
 
 To test an AWS service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 
@@ -318,7 +319,7 @@ Before committing, explicitly state the answers to these five questions and wait
 1. **What could go wrong with this?** — at least one weakness or risk
 2. **What did I assume?** — anything that could break under different conditions
 3. **Does CLAUDE.md need an update?** — if a decision or pattern was established, document it
-4. **Does the README need an update?** — if the public-facing setup or structure changed
+4. **Does the README need an update?** — check every section that could be affected: Project Structure (new files in `app/` or `tests/`), API Reference (new or changed endpoints), Architecture Decisions (new patterns), Environment Variables (new vars), and How It Works (changed flows). Update before committing, not as a follow-up.
 5. **Is test coverage complete?** — for each new endpoint: auth enforcement, input validation, cross-user isolation (if applicable), exact response shape, and any DB-side effects not surfaced by HTTP. Name any gaps.
 
 ## What Not To Do

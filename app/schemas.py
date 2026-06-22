@@ -97,6 +97,19 @@ class EntitySource(StrEnum):
     PYZBAR = "PYZBAR"
 
 
+class EventType(StrEnum):
+    TEXTRACT_PAGE = "TEXTRACT_PAGE"
+    COMPREHEND_CHAR = "COMPREHEND_CHAR"
+    REKOGNITION_FACE = "REKOGNITION_FACE"
+    PDF_REDACTION = "PDF_REDACTION"
+    TEXT_REDACTION = "TEXT_REDACTION"
+
+
+class InputType(StrEnum):
+    PDF = "PDF"
+    TEXT = "TEXT"
+
+
 class PdfEntityRead(DetectedEntity):
     source: EntitySource
     bboxes: list[BoundingBox]
