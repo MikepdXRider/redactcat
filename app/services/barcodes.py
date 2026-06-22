@@ -32,18 +32,33 @@ def detect_barcodes(pix: fitz.Pixmap) -> list[BarcodeDetection]:
     for code in codes:
         entity_type = "QR_CODE" if code.type == "QRCODE" else "BARCODE"
         text = code.data.decode("utf-8", errors="replace")
-        xs = [p.x for p in code.polygon]
-        ys = [p.y for p in code.polygon]
+
+        # default to rect 
+        left = code.rect.left
+        top = code.rect.top
+        width = code.rect.width
+        height - code.rect.height
+        
+        if code.polygon:
+            # use polygon if available
+            xs = [p.x for p in code.polygon]
+            ys = [p.y for p in code.polygon]
+            left=min(xs),
+            top=min(ys),
+            width=(max(xs) - min(xs)),
+            height=(max(ys) - min(ys))
+
         results.append(
             BarcodeDetection(
                 entity_type=entity_type,
                 text=text,
                 bbox=BoundingBox(
-                    left=min(xs) / gray_pix.width,
-                    top=min(ys) / gray_pix.height,
-                    width=(max(xs) - min(xs)) / gray_pix.width,
-                    height=(max(ys) - min(ys)) / gray_pix.height,
+                    left=left / gray_pix.width,
+                    top=top / gray_pix.height,
+                    width=width / gray_pix.width,
+                    height=height / gray_pix.height,
                 ),
             )
         )
+        
     return results
