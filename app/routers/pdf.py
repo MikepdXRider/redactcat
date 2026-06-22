@@ -95,6 +95,8 @@ def scan_pdf(
         # so the extra render cost is negligible. Also used for Rekognition JPEG.
         # QR codes/barcodes can be vector graphics that don't appear in
         # get_images(), so the render can't be gated on has_images.
+        # pix owns its pixel data independently of doc, so it stays valid
+        # after this `with` block closes (used by detect_barcodes below).
         pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
         page_image_bytes = pix.tobytes(output="jpeg") if has_images else None
 
