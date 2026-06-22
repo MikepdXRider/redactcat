@@ -25,6 +25,13 @@ uv run ruff check .
 # Start dev server
 uv run uvicorn app.main:app --reload
 
+# macOS only: pyzbar requires libzbar0 (Homebrew installs to a non-standard path).
+# Install once, then prefix test and server commands with DYLD_LIBRARY_PATH:
+#   brew install zbar
+#   DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run pytest
+#   DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run uvicorn app.main:app --reload
+# Or add `export DYLD_LIBRARY_PATH=/opt/homebrew/lib` to your shell profile.
+
 # Build Docker image
 docker build -t redactcat .
 
@@ -247,6 +254,7 @@ Current patch targets:
 - `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.apply_pdf_redactions` — mock in `tests/test_pdf.py` (redact endpoint)
 - `app.routers.pdf.detect_faces` — mock in `tests/test_pdf.py` (scan endpoint, face detection)
+- `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf.py` (scan endpoint, QR/barcode detection)
 
 To test a service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection.py` for the pattern.
 

@@ -89,7 +89,7 @@ class BoundingBox(BaseModel):
 
 
 class PdfEntityRead(DetectedEntity):
-    source: Literal["COMPREHEND", "REKOGNITION"]
+    source: Literal["COMPREHEND", "REKOGNITION", "PYZBAR"]
     bboxes: list[BoundingBox]
 
 

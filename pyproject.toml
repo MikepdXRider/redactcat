@@ -17,6 +17,7 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "alembic>=1.13",
     "pymupdf>=1.27.2.3",
+    "pyzbar>=0.1.9",
 ]
 
 [dependency-groups]

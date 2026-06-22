@@ -6,11 +6,12 @@ ephemerally in S3; entity bounding boxes travel in HTTP payloads rather than the
 Flow: POST /pdf/scan uploads the PDF to S3, runs Textract + Comprehend, maps character
 offsets to word-level bboxes, and returns them to the client. If the page contains
 embedded images, Rekognition detect_faces is also called and FACE entities are appended.
-The Job row is created only after all AWS calls succeed — if any raises, there is no
-orphaned DB row (the S3 object is cleaned up by the bucket lifecycle rule). POST
-/pdf/redact atomically claims the Job row via DELETE RETURNING (filtered by both PK and
-user_id), commits immediately so concurrent callers see the deletion, then applies
-redactions and returns a presigned URL.
+pyzbar is always called to detect QR codes and barcodes (which may be vector graphics
+rather than embedded images). The Job row is created only after all calls succeed — if
+any raises, there is no orphaned DB row (the S3 object is cleaned up by the bucket
+lifecycle rule). POST /pdf/redact atomically claims the Job row via DELETE RETURNING
+(filtered by both PK and user_id), commits immediately so concurrent callers see the
+deletion, then applies redactions and returns a presigned URL.
 
 Jobs expire after 1 hour. If the job is too old or the original S3 object is gone when
 redact is called, we return 410 Gone and clean up any remaining S3 objects.
@@ -30,6 +31,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Job, User
 from app.schemas import BoundingBox, PdfEntityRead, PdfRedactRead, PdfRedactRequest, PdfScanRead
+from app.services.barcodes import detect_barcodes
 from app.services.detection import detect_pii_entities
 from app.services.extraction import WordSpan, extract_text_from_pdf_s3
 from app.services.redaction import apply_pdf_redactions
@@ -87,16 +89,24 @@ def scan_pdf(
             )
         page = doc[0]
         has_images = bool(page.get_images())
-        page_image_bytes = page.get_pixmap().tobytes(output="jpeg") if has_images else None
+        # Always render at 3x (216 DPI) — pyzbar needs sufficient pixel density
+        # to decode QR codes and barcodes; 1x (72 DPI) is too coarse and 2x is
+        # marginal for small or dense codes. Network latency dominates scan time
+        # so the extra render cost is negligible. Also used for Rekognition JPEG.
+        # QR codes/barcodes can be vector graphics that don't appear in
+        # get_images(), so the render can't be gated on has_images.
+        pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
+        page_image_bytes = pix.tobytes(output="jpeg") if has_images else None
 
     s3_key = f"pdfs/{current_user.id}/{secrets.token_urlsafe(16)}/{_ORIGINAL_FILENAME}"
     upload_to_s3(pdf_bytes, settings.S3_BUCKET, s3_key)
 
-    # Job row is created only after all AWS calls succeed. If any raises,
+    # Job row is created only after all calls succeed. If any raises,
     # the S3 object is orphaned but the lifecycle rule cleans it up — no DB leak.
     text, word_spans = extract_text_from_pdf_s3(settings.S3_BUCKET, s3_key)
     raw_entities = detect_pii_entities(text)
     face_detections = detect_faces(page_image_bytes) if page_image_bytes else []
+    barcode_detections = detect_barcodes(pix)
 
     job = Job(user_id=current_user.id, original_s3_key=s3_key)
     db.add(job)
@@ -127,8 +137,20 @@ def scan_pdf(
         )
         for face in face_detections
     ]
+    barcode_entities = [
+        PdfEntityRead(
+            source="PYZBAR",
+            entity_type=b.entity_type,
+            text=b.text,
+            start_offset=0,
+            end_offset=0,
+            confidence=1.0,
+            bboxes=[b.bbox],
+        )
+        for b in barcode_detections
+    ]
 
-    return PdfScanRead(job_id=job.id, entities=text_entities + face_entities)
+    return PdfScanRead(job_id=job.id, entities=text_entities + face_entities + barcode_entities)
 
 
 @router.post("/redact", response_model=PdfRedactRead, status_code=status.HTTP_200_OK)
