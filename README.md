@@ -8,6 +8,7 @@ A FastAPI service for detecting and redacting PII from text and PDF documents. U
 |-------|--------|-----------|
 | Framework | FastAPI | Async-ready, OpenAPI docs out of the box, first-class dependency injection |
 | ORM | SQLAlchemy 2.0 | `Mapped`/`mapped_column` declarative syntax, explicit session control |
+| Migrations | Alembic | Schema migrations with autogenerate; runs automatically on container startup before accepting traffic |
 | Auth | PyJWT + bcrypt | passlib is incompatible with bcrypt 5.x; rolling own keeps the dependency surface minimal |
 | Validation | Pydantic v2 | Co-designed with FastAPI; field-level constraints enforced at the request boundary |
 | Package management | uv | Near-instant installs, lockfile determinism, replaces pip + venv |
