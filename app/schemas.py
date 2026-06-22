@@ -137,6 +137,7 @@ class PdfEntityRead(DetectedEntity):
 class PdfScanRead(BaseModel):
     job_id: int
     entities: list[PdfEntityRead]
+    expires_at: datetime
 
 
 class PdfRedactRequest(BaseModel):
@@ -146,3 +147,4 @@ class PdfRedactRequest(BaseModel):
 
 class PdfRedactRead(BaseModel):
     download_url: str
+    expires_at: datetime

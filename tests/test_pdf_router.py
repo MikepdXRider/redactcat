@@ -102,6 +102,12 @@ def _mock_barcode() -> list[BarcodeDetection]:
     ]
 
 
+@pytest.fixture(autouse=True)
+def mock_schedule_job_expiry():
+    with patch("app.routers.pdf.schedule_job_expiry"):
+        yield
+
+
 def _do_scan(client: TestClient, tokens: dict, one_page_pdf: bytes) -> dict:
     with (
         patch("app.routers.pdf.upload_to_s3"),
@@ -123,7 +129,6 @@ def _do_redact(client: TestClient, tokens: dict, scan: dict, pdf_bytes: bytes) -
         patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
-        patch("app.routers.pdf.delete_from_s3"),
     ):
         return client.post(
             "/pdf/redact",
@@ -210,7 +215,7 @@ def test_scan_returns_entities(client: TestClient, one_page_pdf: bytes) -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert set(data.keys()) == {"job_id", "entities"}
+    assert set(data.keys()) == {"job_id", "entities", "expires_at"}
     assert isinstance(data["job_id"], int)
     assert len(data["entities"]) == 1
 
@@ -399,7 +404,6 @@ def test_redact_face_entity(client: TestClient, one_page_pdf_with_image: bytes) 
         patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
-        patch("app.routers.pdf.delete_from_s3"),
     ):
         response = client.post(
             "/pdf/redact",
@@ -408,7 +412,8 @@ def test_redact_face_entity(client: TestClient, one_page_pdf_with_image: bytes) 
         )
 
     assert response.status_code == 200
-    assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
+    assert response.json()["download_url"] == "https://s3.example.com/redacted.pdf"
+    assert "expires_at" in response.json()
 
 
 # --- pyzbar barcode / QR code detection ---
@@ -510,7 +515,6 @@ def test_redact_pyzbar_entity(client: TestClient, one_page_pdf: bytes) -> None:
         patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
-        patch("app.routers.pdf.delete_from_s3"),
     ):
         response = client.post(
             "/pdf/redact",
@@ -519,7 +523,8 @@ def test_redact_pyzbar_entity(client: TestClient, one_page_pdf: bytes) -> None:
         )
 
     assert response.status_code == 200
-    assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
+    assert response.json()["download_url"] == "https://s3.example.com/redacted.pdf"
+    assert "expires_at" in response.json()
 
 
 def test_redact_mixed_source_entities(client: TestClient, one_page_pdf: bytes) -> None:
@@ -545,7 +550,6 @@ def test_redact_mixed_source_entities(client: TestClient, one_page_pdf: bytes) -
         patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
-        patch("app.routers.pdf.delete_from_s3"),
     ):
         response = client.post(
             "/pdf/redact",
@@ -554,7 +558,8 @@ def test_redact_mixed_source_entities(client: TestClient, one_page_pdf: bytes) -
         )
 
     assert response.status_code == 200
-    assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
+    assert response.json()["download_url"] == "https://s3.example.com/redacted.pdf"
+    assert "expires_at" in response.json()
 
 
 def test_scan_barcode_failure_does_not_create_job(
@@ -626,7 +631,6 @@ def test_redact_returns_download_url(client: TestClient, one_page_pdf: bytes) ->
         patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
-        patch("app.routers.pdf.delete_from_s3"),
     ):
         response = client.post(
             "/pdf/redact",
@@ -635,10 +639,12 @@ def test_redact_returns_download_url(client: TestClient, one_page_pdf: bytes) ->
         )
 
     assert response.status_code == 200
-    assert response.json() == {"download_url": "https://s3.example.com/redacted.pdf"}
+    data = response.json()
+    assert data["download_url"] == "https://s3.example.com/redacted.pdf"
+    assert "expires_at" in data
 
 
-def test_redact_deletes_job_from_db(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+def test_redact_job_row_persists_after_redact(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     scan = _do_scan(client, tokens, one_page_pdf)
     job_id = scan["job_id"]
@@ -648,38 +654,16 @@ def test_redact_deletes_job_from_db(client: TestClient, db: Session, one_page_pd
         patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
         patch("app.routers.pdf.upload_to_s3"),
         patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
-        patch("app.routers.pdf.delete_from_s3"),
     ):
-        client.post(
+        response = client.post(
             "/pdf/redact",
             json={"job_id": job_id, "entities": scan["entities"]},
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
         )
 
+    assert response.status_code == 200
     db.expire_all()
-    assert db.get(Job, job_id) is None
-
-
-def test_redact_calls_s3_cleanup(client: TestClient, one_page_pdf: bytes) -> None:
-    tokens = _register(client)
-    scan = _do_scan(client, tokens, one_page_pdf)
-
-    with (
-        patch("app.routers.pdf.download_from_s3", return_value=one_page_pdf),
-        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
-        patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
-        patch("app.routers.pdf.delete_from_s3") as mock_delete,
-    ):
-        client.post(
-            "/pdf/redact",
-            json={"job_id": scan["job_id"], "entities": scan["entities"]},
-            headers={"Authorization": f"Bearer {tokens['access_token']}"},
-        )
-
-    assert mock_delete.call_count == 1
-    deleted_key = mock_delete.call_args.args[1]
-    assert deleted_key.endswith("/original.pdf")
+    assert db.get(Job, job_id) is not None
 
 
 def test_redact_expired_job(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
@@ -691,16 +675,16 @@ def test_redact_expired_job(client: TestClient, db: Session, one_page_pdf: bytes
     job.created_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=2)
     db.commit()
 
-    with patch("app.routers.pdf.delete_from_s3"):
-        response = client.post(
-            "/pdf/redact",
-            json={"job_id": job_id, "entities": []},
-            headers={"Authorization": f"Bearer {tokens['access_token']}"},
-        )
+    response = client.post(
+        "/pdf/redact",
+        json={"job_id": job_id, "entities": []},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
 
     assert response.status_code == 410
+    # Job row is left intact — the Lambda owns cleanup for expired jobs.
     db.expire_all()
-    assert db.get(Job, job_id) is None
+    assert db.get(Job, job_id) is not None
 
 
 def test_redact_s3_not_found_returns_410(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
@@ -710,10 +694,7 @@ def test_redact_s3_not_found_returns_410(client: TestClient, db: Session, one_pa
 
     no_such_key = ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not Found"}}, "GetObject")
 
-    with (
-        patch("app.routers.pdf.download_from_s3", side_effect=no_such_key),
-        patch("app.routers.pdf.delete_from_s3"),
-    ):
+    with patch("app.routers.pdf.download_from_s3", side_effect=no_such_key):
         response = client.post(
             "/pdf/redact",
             json={"job_id": job_id, "entities": []},
@@ -721,8 +702,9 @@ def test_redact_s3_not_found_returns_410(client: TestClient, db: Session, one_pa
         )
 
     assert response.status_code == 410
+    # Job row is left intact — the Lambda owns cleanup.
     db.expire_all()
-    assert db.get(Job, job_id) is None
+    assert db.get(Job, job_id) is not None
 
 
 # --- Usage event recording ---
@@ -826,5 +808,97 @@ def test_redact_records_pdf_redaction_event(client: TestClient, db: Session, one
     assert ev.input_type == "PDF"
     assert ev.quantity == 1
     assert ev.token_cost == 0
-    # Job row is deleted, but the plain-int job_id is preserved for client grouping
     assert ev.job_id == scan["job_id"]
+
+
+# --- Scheduler and session model ---
+
+
+def test_scan_calls_schedule_job_expiry(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe", _mock_word_spans())),
+        patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+        patch("app.routers.pdf.schedule_job_expiry") as mock_schedule,
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+    mock_schedule.assert_called_once()
+    s3_key = mock_schedule.call_args.args[0]
+    assert s3_key.startswith("pdfs/")
+    assert s3_key.endswith("/original.pdf")
+
+
+def test_scan_scheduler_failure_does_not_fail_scan(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.detect_pii_entities", return_value=[]),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+        patch("app.routers.pdf.schedule_job_expiry", side_effect=Exception("scheduler unavailable")),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+
+
+def test_scan_response_includes_expires_at(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    scan = _do_scan(client, tokens, one_page_pdf)
+    assert "expires_at" in scan
+    assert isinstance(scan["expires_at"], str)
+
+
+def test_redact_response_includes_expires_at(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    scan = _do_scan(client, tokens, one_page_pdf)
+    result = _do_redact(client, tokens, scan, one_page_pdf)
+    assert "expires_at" in result
+    assert "download_url" in result
+
+
+def test_redact_unique_key_per_call(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    scan = _do_scan(client, tokens, one_page_pdf)
+
+    uploaded_keys: list[str] = []
+
+    def capture_upload(data: bytes, bucket: str, key: str) -> None:
+        uploaded_keys.append(key)
+
+    with (
+        patch("app.routers.pdf.download_from_s3", return_value=one_page_pdf),
+        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
+        patch("app.routers.pdf.upload_to_s3", side_effect=capture_upload),
+        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
+    ):
+        resp1 = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": []},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        resp2 = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": []},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+    assert len(uploaded_keys) == 2
+    assert uploaded_keys[0] != uploaded_keys[1]
+    assert all("redacted_" in k and k.endswith(".pdf") for k in uploaded_keys)
