@@ -33,20 +33,21 @@ def detect_barcodes(pix: fitz.Pixmap) -> list[BarcodeDetection]:
         entity_type = "QR_CODE" if code.type == "QRCODE" else "BARCODE"
         text = code.data.decode("utf-8", errors="replace")
 
-        # default to rect 
+        # Default to the axis-aligned rect; fall back from polygon when present
+        # (polygon gives a tighter fit on rotated symbols). Some 1D symbologies
+        # return an empty polygon, so rect is the safe default.
         left = code.rect.left
         top = code.rect.top
         width = code.rect.width
         height = code.rect.height
-        
+
         if code.polygon:
-            # use polygon if available
             xs = [p.x for p in code.polygon]
             ys = [p.y for p in code.polygon]
-            left=min(xs),
-            top=min(ys),
-            width=(max(xs) - min(xs)),
-            height=(max(ys) - min(ys))
+            left = min(xs)
+            top = min(ys)
+            width = max(xs) - min(xs)
+            height = max(ys) - min(ys)
 
         results.append(
             BarcodeDetection(
@@ -60,5 +61,5 @@ def detect_barcodes(pix: fitz.Pixmap) -> list[BarcodeDetection]:
                 ),
             )
         )
-        
+
     return results
