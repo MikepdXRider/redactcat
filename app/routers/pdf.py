@@ -30,7 +30,14 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Job, User
-from app.schemas import BoundingBox, PdfEntityRead, PdfRedactRead, PdfRedactRequest, PdfScanRead
+from app.schemas import (
+    BoundingBox,
+    EntitySource,
+    PdfEntityRead,
+    PdfRedactRead,
+    PdfRedactRequest,
+    PdfScanRead,
+)
 from app.services.barcodes import detect_barcodes
 from app.services.detection import detect_pii_entities
 from app.services.extraction import WordSpan, extract_text_from_pdf_s3
@@ -117,7 +124,7 @@ def scan_pdf(
 
     text_entities = [
         PdfEntityRead(
-            source="COMPREHEND",
+            source=EntitySource.COMPREHEND,
             entity_type=e.entity_type,
             text=e.text,
             start_offset=e.start_offset,
@@ -129,7 +136,7 @@ def scan_pdf(
     ]
     face_entities = [
         PdfEntityRead(
-            source="REKOGNITION",
+            source=EntitySource.REKOGNITION,
             entity_type="FACE",
             text="",
             start_offset=0,
@@ -141,7 +148,7 @@ def scan_pdf(
     ]
     barcode_entities = [
         PdfEntityRead(
-            source="PYZBAR",
+            source=EntitySource.PYZBAR,
             entity_type=b.entity_type,
             text=b.text,
             start_offset=0,

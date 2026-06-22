@@ -7,7 +7,7 @@ defined once here and referenced by name.
 """
 
 from datetime import datetime
-from typing import Literal
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -88,8 +88,17 @@ class BoundingBox(BaseModel):
     height: float
 
 
+# Which detector produced a PdfEntityRead. The field is typed as this enum, so the
+# valid set lives in one place and any reference (router, tests) is a guaranteed
+# member. StrEnum members compare and serialize as their string value.
+class EntitySource(StrEnum):
+    COMPREHEND = "COMPREHEND"
+    REKOGNITION = "REKOGNITION"
+    PYZBAR = "PYZBAR"
+
+
 class PdfEntityRead(DetectedEntity):
-    source: Literal["COMPREHEND", "REKOGNITION", "PYZBAR"]
+    source: EntitySource
     bboxes: list[BoundingBox]
 
 
