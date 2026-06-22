@@ -16,7 +16,7 @@ from app.models import User
 from app.schemas import EventType, InputType, TextRedactRead, TextRedactRequest, TextScanRead, TextScanRequest
 from app.services.detection import detect_pii_entities
 from app.services.redaction import apply_text_redactions
-from app.services.usage import record_usage_event
+from app.services.usage import COMPREHEND_MIN_CHARS, record_usage_event
 
 router = APIRouter(tags=["text"])
 
@@ -28,7 +28,7 @@ def scan_text(
     current_user: User = Depends(get_current_user),
 ) -> TextScanRead:
     entities = detect_pii_entities(body.text)
-    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.TEXT, quantity=max(len(body.text), 300))
+    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.TEXT, quantity=max(len(body.text), COMPREHEND_MIN_CHARS))
     return TextScanRead(text=body.text, entities=entities)
 
 

@@ -46,7 +46,7 @@ from app.services.extraction import WordSpan, extract_text_from_pdf_s3
 from app.services.redaction import apply_pdf_redactions
 from app.services.rekognition import detect_faces
 from app.services.storage import delete_from_s3, download_from_s3, generate_presigned_url, upload_to_s3
-from app.services.usage import record_usage_event
+from app.services.usage import COMPREHEND_MIN_CHARS, record_usage_event
 
 router = APIRouter(tags=["pdf"])
 
@@ -126,7 +126,7 @@ def scan_pdf(
     db.refresh(job)
 
     record_usage_event(db, current_user.id, EventType.TEXTRACT_PAGE, InputType.PDF, quantity=1, job_id=job.id)
-    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.PDF, quantity=max(len(text), 300), job_id=job.id)
+    record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.PDF, quantity=max(len(text), COMPREHEND_MIN_CHARS), job_id=job.id)
     if page_image_bytes:
         record_usage_event(db, current_user.id, EventType.REKOGNITION_FACE, InputType.PDF, quantity=1, job_id=job.id)
 

@@ -33,7 +33,6 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_usage_events_created_at'), 'usage_events', ['created_at'], unique=False)
     op.create_index(op.f('ix_usage_events_job_id'), 'usage_events', ['job_id'], unique=False)
     op.create_index('ix_usage_events_user_created', 'usage_events', ['user_id', 'created_at'], unique=False)
     op.create_index(op.f('ix_usage_events_user_id'), 'usage_events', ['user_id'], unique=False)
@@ -46,6 +45,5 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_usage_events_user_id'), table_name='usage_events')
     op.drop_index('ix_usage_events_user_created', table_name='usage_events')
     op.drop_index(op.f('ix_usage_events_job_id'), table_name='usage_events')
-    op.drop_index(op.f('ix_usage_events_created_at'), table_name='usage_events')
     op.drop_table('usage_events')
     # ### end Alembic commands ###

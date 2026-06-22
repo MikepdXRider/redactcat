@@ -15,6 +15,9 @@ from app.schemas import EventType, InputType
 
 logger = logging.getLogger(__name__)
 
+# AWS bills a minimum of 300 characters per Comprehend API call.
+COMPREHEND_MIN_CHARS = 300
+
 TOKEN_COST_PER_UNIT: dict[EventType, int] = {
     EventType.TEXTRACT_PAGE: 1500,
     EventType.COMPREHEND_CHAR: 1,

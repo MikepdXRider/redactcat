@@ -59,9 +59,9 @@ class UsageEvent(Base):
     quantity: Mapped[int] = mapped_column()
     token_cost: Mapped[int] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(UTC).replace(tzinfo=None), index=True
+        default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
 
 
-# Composite index for the future enforcement query: WHERE user_id = ? AND created_at > ?
+# Composite index covers the common query: WHERE user_id = ? AND created_at >= ?
 Index("ix_usage_events_user_created", UsageEvent.user_id, UsageEvent.created_at)
