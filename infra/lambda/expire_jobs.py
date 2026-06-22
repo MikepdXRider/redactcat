@@ -27,14 +27,17 @@ def handler(event: dict, context: object) -> None:
     prefix = s3_key.rsplit("/", 1)[0] + "/"
 
     # S3 cleanup — PII concern; raise if listing fails; log and continue on per-key delete errors
+    token = s3_key.split("/")[2]
+
     paginator = _s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=s3_bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
+            filename = obj["Key"].rsplit("/", 1)[-1]
             try:
                 _s3.delete_object(Bucket=s3_bucket, Key=obj["Key"])
-                logger.info("deleted s3://%s/%s", s3_bucket, obj["Key"])
+                logger.info("deleted token=%s file=%s", token, filename)
             except ClientError as exc:
-                logger.error("failed to delete s3://%s/%s: %s", s3_bucket, obj["Key"], exc)
+                logger.error("failed to delete token=%s file=%s: %s", token, filename, exc)
 
     # DB cleanup — best-effort; Job row contains no PII
     try:
@@ -43,6 +46,6 @@ def handler(event: dict, context: object) -> None:
         with psycopg2.connect(database_url) as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM jobs WHERE original_s3_key = %s", (s3_key,))
-                logger.info("deleted %d job row(s) for s3_key=%s", cur.rowcount, s3_key)
+                logger.info("deleted %d job row(s) for token=%s", cur.rowcount, token)
     except Exception as exc:
-        logger.error("db cleanup failed for s3_key=%s: %s", s3_key, type(exc).__name__)
+        logger.error("db cleanup failed for token=%s: %s", token, type(exc).__name__)

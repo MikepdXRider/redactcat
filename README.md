@@ -98,10 +98,10 @@ Returns: { "job_id": 1, "expires_at": "2026-01-01T01:00:00", "entities": [{ "sou
 
 POST /pdf/redact
 Body:    { "job_id": 1, "entities": [...] }                    ← filtered scan response
-Returns: { "download_url": "https://...", "expires_at": "..." } ← presigned S3 URL (5 min TTL)
+Returns: { "download_url": "https://...", "expires_at": "..." } ← presigned S3 URL (TTL matches expires_at)
 ```
 
-The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. `source` is `COMPREHEND`, `REKOGNITION`, or `PYZBAR`. Bounding boxes are normalized (0–1 fractions of page dimensions) regardless of detection source. Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour (`expires_at`); the presigned URL gives a 5-minute download window. Multiple redact calls on the same job each produce a distinct output file — the previous presigned URLs remain valid until `expires_at`.
+The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. `source` is `COMPREHEND`, `REKOGNITION`, or `PYZBAR`. Bounding boxes are normalized (0–1 fractions of page dimensions) regardless of detection source. Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour (`expires_at`). The presigned URL TTL matches `expires_at` — all URLs from a job are valid until the job window closes and the Lambda deletes the underlying S3 objects. Multiple redact calls on the same job each produce a distinct output file.
 
 ## Quickstart
 
@@ -243,7 +243,7 @@ redactcat/
 │       ├── extraction.py  # AWS Textract PDF text extraction + word bbox mapping
 │       ├── redaction.py   # Text redaction (string substitution) and PDF redaction (PyMuPDF)
 │       ├── rekognition.py # AWS Rekognition face detection in embedded images
-│       ├── storage.py     # S3 upload, download, delete, presigned URL
+│       ├── storage.py     # S3 upload, download, presigned URL
 │       └── usage.py       # Usage event recording — token costs per AWS call, best-effort DB insert
 ├── tests/
 │   ├── conftest.py              # Fixtures: engine, db session, TestClient

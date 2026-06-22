@@ -9,14 +9,11 @@ TTL check in /pdf/redact.
 """
 
 import json
-import logging
 from datetime import UTC, datetime, timedelta
 
 import boto3
 
 from app.config import settings
-
-logger = logging.getLogger(__name__)
 
 JOB_TTL = timedelta(hours=1)
 
@@ -25,7 +22,8 @@ _scheduler = boto3.client("scheduler")
 
 def schedule_job_expiry(s3_key: str) -> None:
     token = s3_key.split("/")[2]
-    fire_at = datetime.now(UTC) + JOB_TTL
+    # strftime strips tzinfo — AWS at() expressions are always interpreted as UTC
+    fire_at = datetime.now(UTC).replace(tzinfo=None) + JOB_TTL
     _scheduler.create_schedule(
         Name=f"expire-{token}",
         ScheduleExpression=f"at({fire_at.strftime('%Y-%m-%dT%H:%M:%S')})",

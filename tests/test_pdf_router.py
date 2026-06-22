@@ -14,6 +14,7 @@ from app.schemas import BoundingBox, DetectedEntity
 from app.services.barcodes import BarcodeDetection
 from app.services.extraction import WordSpan
 from app.services.rekognition import FaceDetection
+from app.services.scheduler import JOB_TTL
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "secret123") -> dict:
@@ -858,16 +859,21 @@ def test_scan_scheduler_failure_does_not_fail_scan(client: TestClient, one_page_
 
 def test_scan_response_includes_expires_at(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
+    before = datetime.now(UTC).replace(tzinfo=None)
     scan = _do_scan(client, tokens, one_page_pdf)
-    assert "expires_at" in scan
-    assert isinstance(scan["expires_at"], str)
+    after = datetime.now(UTC).replace(tzinfo=None)
+    expires_at = datetime.fromisoformat(scan["expires_at"])
+    assert before + JOB_TTL <= expires_at <= after + JOB_TTL
 
 
 def test_redact_response_includes_expires_at(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
+    before = datetime.now(UTC).replace(tzinfo=None)
     scan = _do_scan(client, tokens, one_page_pdf)
+    after = datetime.now(UTC).replace(tzinfo=None)
     result = _do_redact(client, tokens, scan, one_page_pdf)
-    assert "expires_at" in result
+    job_expires_at = datetime.fromisoformat(result["expires_at"])
+    assert before + JOB_TTL <= job_expires_at <= after + JOB_TTL
     assert "download_url" in result
 
 
