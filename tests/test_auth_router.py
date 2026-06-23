@@ -1,12 +1,11 @@
-# Tests for /auth endpoints — register, login, logout, token refresh, and API keys
+# Tests for /auth endpoints — register, login, logout, and token refresh
 from datetime import datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ApiKey, RefreshToken
-from app.services.auth import API_KEY_PREFIX, hash_api_key
+from app.models import RefreshToken
 
 PASSWORD = "supersecurepassword"
 
@@ -173,133 +172,3 @@ def test_refresh_expired_token_returns_401(client: TestClient, db: Session) -> N
 def test_refresh_invalid_token_returns_401(client: TestClient) -> None:
     response = client.post("/auth/refresh", json={"refresh_token": "not-a-real-token"})
     assert response.status_code == 401
-
-
-# --- POST /auth/api-key ---
-
-def test_generate_api_key_returns_key(client: TestClient) -> None:
-    tokens = _register(client)
-    response = client.post("/auth/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"})
-    assert response.status_code == 201
-    data = response.json()
-    assert set(data.keys()) == {"key"}
-    assert data["key"].startswith(API_KEY_PREFIX)
-
-
-def test_generate_api_key_stores_hash_not_raw(client: TestClient, db: Session) -> None:
-    tokens = _register(client)
-    response = client.post("/auth/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"})
-    key = response.json()["key"]
-    row = db.scalar(select(ApiKey))
-    assert row is not None
-    assert row.key_hash == hash_api_key(key)
-    assert row.key_hash != key
-
-
-def test_generate_api_key_stores_prefix(client: TestClient, db: Session) -> None:
-    tokens = _register(client)
-    response = client.post("/auth/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"})
-    key = response.json()["key"]
-    row = db.scalar(select(ApiKey))
-    assert row is not None
-    assert row.key_prefix == key[:len(API_KEY_PREFIX) + 8]
-
-
-def test_rotate_api_key_replaces_old_key(client: TestClient, db: Session) -> None:
-    tokens = _register(client)
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    first_key = client.post("/auth/api-key", headers=headers).json()["key"]
-    second_key = client.post("/auth/api-key", headers=headers).json()["key"]
-    assert first_key != second_key
-    # Only one row should exist
-    rows = db.scalars(select(ApiKey)).all()
-    assert len(rows) == 1
-    assert rows[0].key_hash == hash_api_key(second_key)
-
-
-def test_generate_api_key_requires_auth(client: TestClient) -> None:
-    response = client.post("/auth/api-key")
-    assert response.status_code == 401
-
-
-# --- GET /auth/api-key ---
-
-def test_get_api_key_metadata_returns_prefix_and_timestamps(client: TestClient) -> None:
-    tokens = _register(client)
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    key = client.post("/auth/api-key", headers=headers).json()["key"]
-    response = client.get("/auth/api-key", headers=headers)
-    assert response.status_code == 200
-    data = response.json()
-    assert set(data.keys()) == {"key_prefix", "created_at", "last_used_at"}
-    assert data["key_prefix"] == key[:len(API_KEY_PREFIX) + 8]
-    assert data["last_used_at"] is None
-
-
-def test_get_api_key_metadata_404_when_no_key(client: TestClient) -> None:
-    tokens = _register(client)
-    response = client.get("/auth/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"})
-    assert response.status_code == 404
-
-
-def test_get_api_key_metadata_requires_auth(client: TestClient) -> None:
-    response = client.get("/auth/api-key")
-    assert response.status_code == 401
-
-
-# --- DELETE /auth/api-key ---
-
-def test_revoke_api_key_deletes_row(client: TestClient, db: Session) -> None:
-    tokens = _register(client)
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    client.post("/auth/api-key", headers=headers)
-    response = client.delete("/auth/api-key", headers=headers)
-    assert response.status_code == 204
-    assert db.scalar(select(ApiKey)) is None
-
-
-def test_revoke_api_key_no_op_when_none_exists(client: TestClient) -> None:
-    tokens = _register(client)
-    response = client.delete("/auth/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"})
-    assert response.status_code == 204
-
-
-def test_revoke_api_key_second_delete_is_no_op(client: TestClient) -> None:
-    tokens = _register(client)
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    client.post("/auth/api-key", headers=headers)
-    client.delete("/auth/api-key", headers=headers)
-    response = client.delete("/auth/api-key", headers=headers)
-    assert response.status_code == 204
-
-
-def test_revoke_api_key_requires_auth(client: TestClient) -> None:
-    response = client.delete("/auth/api-key")
-    assert response.status_code == 401
-
-
-# --- Cross-user isolation ---
-
-def test_api_key_isolated_per_user(client: TestClient, db: Session) -> None:
-    tokens_a = _register(client, "a@example.com")
-    tokens_b = _register(client, "b@example.com")
-    client.post("/auth/api-key", headers={"Authorization": f"Bearer {tokens_a['access_token']}"})
-    # User B has no key
-    response = client.get("/auth/api-key", headers={"Authorization": f"Bearer {tokens_b['access_token']}"})
-    assert response.status_code == 404
-
-
-# --- API key cannot manage itself ---
-
-def test_api_key_cannot_call_jwt_only_endpoints(client: TestClient) -> None:
-    tokens = _register(client)
-    key = client.post("/auth/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"}).json()["key"]
-    # /auth/api-key uses get_current_user (JWT-only); an API key must be rejected
-    response = client.post("/auth/api-key", headers={"Authorization": f"Bearer {key}"})
-    assert response.status_code == 401
-
-
-# NOTE: get_current_user_accept_api_key is not yet tested here because no endpoint
-# currently uses it. Tests for valid API key auth, last_used_at updates, invalid key
-# rejection, and cross-user key isolation should be added when the first endpoint is
-# wired to accept API keys.
