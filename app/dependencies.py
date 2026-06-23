@@ -25,11 +25,7 @@ from app.services.auth import API_KEY_PREFIX, hash_api_key
 _bearer = HTTPBearer()
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-    db: Session = Depends(get_db),
-) -> User:
-    token = credentials.credentials
+def _resolve_jwt(token: str, db: Session) -> User:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         user_id = int(payload["sub"])
@@ -41,6 +37,13 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     return user
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    return _resolve_jwt(credentials.credentials, db)
 
 
 def get_current_user_any_auth(
@@ -61,15 +64,5 @@ def get_current_user_any_auth(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
         return user
-    
-    try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        user_id = int(payload["sub"])
-    except (jwt.InvalidTokenError, KeyError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-
-    return user
+    return _resolve_jwt(token, db)
