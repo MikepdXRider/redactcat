@@ -77,6 +77,7 @@ app/
   schemas.py         # All Pydantic request/response schemas
   routers/           # Feature routers — one file per domain
   services/          # Business logic and external integrations
+    auth.py          # API key prefix constant and hash helper — shared by dependencies.py and routers/users.py to avoid a circular import
     detection.py     # AWS Comprehend PII detection → list[DetectedEntity]
     redaction.py     # Text redaction (string substitution, in-memory)
 ```
@@ -131,9 +132,21 @@ def my_endpoint(current_user: User = Depends(get_current_user)) -> ...:
     ...
 ```
 
+For endpoints that should also accept a long-lived API key (currently `/text/*` and `/pdf/*`), use `get_current_user_any_auth` instead. It detects the `rcat_` prefix and dispatches to either the API key or JWT path. Both paths return a `User` object, so handlers are auth-method-agnostic. Use `get_current_user` (JWT-only) for all account management endpoints — a key must not be able to rotate or revoke itself.
+
+```python
+from app.dependencies import get_current_user_any_auth
+
+@router.post("/scan")
+def scan(current_user: User = Depends(get_current_user_any_auth)) -> ...:
+    ...
+```
+
 JWT tokens are signed with the `JWT_SECRET` env var using HS256. `JWT_SECRET` is required — the app will not start without it. `S3_BUCKET` is also required — the app will not start without it. Passwords are hashed directly with bcrypt (`bcrypt.hashpw` / `bcrypt.checkpw`). passlib was removed due to incompatibility with bcrypt 5.x.
 
 **Token pattern:** access tokens are stateless JWTs (30min, no DB storage). Refresh tokens are opaque strings (`secrets.token_urlsafe(32)`) stored in the `refresh_tokens` table. Each `POST /auth/refresh` call **rotates** the pair — the old refresh token row is deleted and a new one is issued. Logout is a DB delete of the refresh token row; the access token expires naturally.
+
+**API key pattern:** one key per user, stored as a SHA-256 hash (deterministic lookup). The raw key is returned once on generation and never stored. `POST /users/me/api-key` generates or rotates; `GET` returns metadata only; `DELETE` revokes. `last_used_at` is updated on every authenticated request.
 
 ### Cross-User Isolation
 
@@ -267,6 +280,8 @@ Current patch targets:
 - `app.services.usage.record_usage_event` — do not mock in router tests; let it write real rows and assert via the `db` fixture. Test the helper in isolation in `tests/test_usage_service.py`.
 
 `app/routers/users.py` and `app/routers/usage.py` have no AWS calls and no patch targets. Tests for `/usage/*` endpoints seed `UsageEvent` rows directly via the `db` fixture in `tests/test_usage_router.py`.
+
+`get_current_user_any_auth` is **not mocked** in tests. Tests that call text/pdf endpoints with an API key seed a real key row by calling `POST /users/me/api-key` in test setup, then pass the returned key as a Bearer token. No patching needed — the dependency reads the real in-memory test DB.
 
 To test an AWS service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection_service.py` for the pattern.
 

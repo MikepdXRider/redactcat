@@ -39,6 +39,9 @@ A single `/pdf/scan` call runs three detection pipelines in sequence:
 
 All three sources return bounding boxes as normalized 0–1 fractions of page dimensions. The `source` field on each entity (`COMPREHEND`, `REKOGNITION`, or `PYZBAR`) lets the client distinguish detection origin.
 
+**Long-lived API keys**
+Processing endpoints (`/text/*`, `/pdf/*`) accept either a short-lived JWT or a long-lived API key as a Bearer token. Keys are `rcat_`-prefixed, generated with `secrets.token_urlsafe(32)`, and stored as SHA-256 hashes (deterministic lookup, unlike bcrypt). One key per user; `POST /users/me/api-key` generates or rotates. Account management endpoints (`/users/me/*`, `/auth/*`) remain JWT-only — a key cannot manage itself.
+
 **Naive UTC datetimes**
 All datetimes are computed in UTC and stored timezone-naive (`datetime.now(UTC).replace(tzinfo=None)`). SQLite has no native timezone support; PostgreSQL `TIMESTAMP WITHOUT TIME ZONE` accepts naive values. The UTC convention is enforced at the application layer — no mixed-offset data enters the DB.
 
@@ -68,10 +71,16 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | GET | /usage/history | ✓ | All usage events for the current calendar month, newest first |
 | PATCH | /users/me | ✓ | Update email or password |
 | DELETE | /users/me | ✓ | Delete account and all active sessions |
-| POST | /text/scan | ✓ | Detect PII entities in text; returns source text + entity list |
-| POST | /text/redact | ✓ | Apply redactions to text; returns redacted string |
-| POST | /pdf/scan | ✓ | Upload single-page PDF; runs Textract (text PII), Rekognition (faces), and pyzbar (barcodes/QR); returns job_id + entities with bboxes |
-| POST | /pdf/redact | ✓ | Apply redactions to PDF; returns presigned download URL and expires_at; can be called multiple times per job |
+| POST | /users/me/api-key | ✓† | Generate or rotate long-lived API key; returns the full key once |
+| GET | /users/me/api-key | ✓† | Get API key metadata (prefix, created_at, last_used_at); 404 if none exists |
+| DELETE | /users/me/api-key | ✓† | Revoke API key |
+| POST | /text/scan | ✓‡ | Detect PII entities in text; returns source text + entity list |
+| POST | /text/redact | ✓‡ | Apply redactions to text; returns redacted string |
+| POST | /pdf/scan | ✓‡ | Upload single-page PDF; runs Textract (text PII), Rekognition (faces), and pyzbar (barcodes/QR); returns job_id + entities with bboxes |
+| POST | /pdf/redact | ✓‡ | Apply redactions to PDF; returns presigned download URL and expires_at; can be called multiple times per job |
+
+† JWT only — API keys cannot manage themselves.
+‡ Accepts JWT or API key.
 
 Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
 
@@ -236,8 +245,9 @@ redactcat/
 │   │   ├── pdf.py         # PDF PII scan and redaction (stateful, S3-backed)
 │   │   ├── text.py        # Text PII scan and redaction (stateless)
 │   │   ├── usage.py       # /usage/summary and /usage/history — current-month token reporting
-│   │   └── users.py       # User profile (get, update, delete)
+│   │   └── users.py       # User profile (get, update, delete) and API key management
 │   └── services/
+│       ├── auth.py        # API key prefix constant and hash helper — shared by dependencies.py and routers/users.py
 │       ├── barcodes.py    # pyzbar QR code and barcode detection from rendered page pixmap
 │       ├── detection.py   # AWS Comprehend PII detection
 │       ├── extraction.py  # AWS Textract PDF text extraction + word bbox mapping
@@ -254,10 +264,11 @@ redactcat/
 │   ├── test_migrations.py       # Alembic upgrade/downgrade integration tests
 │   ├── test_pdf_router.py       # /pdf/scan and /pdf/redact endpoint tests
 │   ├── test_rekognition_service.py # Rekognition service unit tests (botocore Stubber)
+│   ├── test_redaction_service.py # PDF redaction service unit tests
 │   ├── test_text_router.py      # /text/scan and /text/redact endpoint tests
 │   ├── test_usage_router.py     # /usage/summary and /usage/history endpoint tests
 │   ├── test_usage_service.py    # Usage event recording service unit tests
-│   └── test_users_router.py     # User profile endpoint tests
+│   └── test_users_router.py     # User profile and API key management endpoint tests
 ├── infra/                 # Terraform — ECR, App Runner, S3, IAM, SSM, Route 53
 ├── .github/workflows/
 │   ├── ci.yml             # Lint + test on pull requests
