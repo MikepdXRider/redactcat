@@ -5,7 +5,7 @@ on the 1st of each calendar month (midnight UTC). All endpoints are user-scoped
 via get_current_user — no URL nesting under /users needed.
 """
 
-from datetime import UTC, date, datetime
+from datetime import date
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
@@ -15,13 +15,9 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import UsageEvent, User
 from app.schemas import UsageEventRead, UsageRead
+from app.services.usage import billing_month_start
 
 router = APIRouter(tags=["usage"])
-
-
-def _billing_month_start() -> datetime:
-    now = datetime.now(UTC).replace(tzinfo=None)
-    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 @router.get("/summary", response_model=UsageRead, status_code=status.HTTP_200_OK)
@@ -29,7 +25,7 @@ def get_usage_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UsageRead:
-    cutoff = _billing_month_start()
+    cutoff = billing_month_start()
     # coalesce handles SQL NULL (SUM of zero rows); or 0 satisfies mypy since
     # db.scalar() is typed as int | None regardless of the query expression.
     tokens_used: int = db.scalar(
@@ -46,7 +42,7 @@ def get_usage_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[UsageEvent]:
-    cutoff = _billing_month_start()
+    cutoff = billing_month_start()
     return list(
         db.scalars(
             select(UsageEvent)

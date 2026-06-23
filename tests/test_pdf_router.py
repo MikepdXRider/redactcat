@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Job, UsageEvent
-from app.schemas import BoundingBox, DetectedEntity
+from app.models import Job, User, UsageEvent
+from app.schemas import BoundingBox, DetectedEntity, EventType, InputType
 from app.services.barcodes import BarcodeDetection
 from app.services.extraction import WordSpan
 from app.services.rekognition import FaceDetection
@@ -135,6 +135,18 @@ def _do_redact(client: TestClient, tokens: dict, scan: dict, pdf_bytes: bytes) -
             json={"job_id": scan["job_id"], "entities": scan["entities"]},
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
         ).json()
+
+
+def _seed_usage(db: Session, user_id: int, token_cost: int, created_at: datetime | None = None) -> None:
+    db.add(UsageEvent(
+        user_id=user_id,
+        event_type=EventType.TEXTRACT_PAGE,
+        input_type=InputType.PDF,
+        quantity=token_cost,
+        token_cost=token_cost,
+        created_at=created_at if created_at is not None else datetime.now(UTC).replace(tzinfo=None),
+    ))
+    db.commit()
 
 
 # --- POST /pdf/scan ---
@@ -968,3 +980,101 @@ def test_redact_pdf_with_api_key(client: TestClient, one_page_pdf: bytes) -> Non
         )
     assert response.status_code == 200
     assert "download_url" in response.json()
+
+
+# --- Token limit enforcement ---
+
+
+def test_scan_pdf_429_when_at_token_limit(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 50_000)
+    response = client.post(
+        "/pdf/scan",
+        files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 429
+    detail = response.json()["detail"]
+    assert set(detail.keys()) == {"error", "tokens_used", "tokens_allowed", "resets_in_days"}
+    assert detail["error"] == "token_limit_reached"
+    assert detail["tokens_used"] == 50_000
+    assert detail["tokens_allowed"] == 50_000
+    assert 1 <= detail["resets_in_days"] <= 31
+
+
+def test_scan_pdf_allowed_when_under_token_limit(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 49_999)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+
+
+def test_scan_pdf_ignores_usage_from_last_month(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 50_000, created_at=datetime(2020, 1, 1))
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+
+
+def test_scan_pdf_token_limit_isolated_per_user(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens_a = _register(client, "a@example.com")
+    _register(client, "b@example.com")
+    user_b_id = db.scalar(select(User).where(User.email == "b@example.com")).id
+    _seed_usage(db, user_b_id, 50_000)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {tokens_a['access_token']}"},
+        )
+    assert response.status_code == 200
+
+
+def test_redact_pdf_not_gated_by_token_limit(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    scan = _do_scan(client, tokens, one_page_pdf)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 50_000)
+    with (
+        patch("app.routers.pdf.download_from_s3", return_value=one_page_pdf),
+        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
+    ):
+        response = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": []},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200

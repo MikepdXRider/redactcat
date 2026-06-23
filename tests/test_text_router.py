@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -5,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import ApiKey, User, UsageEvent
-from app.schemas import DetectedEntity
+from app.schemas import DetectedEntity, EventType, InputType
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "supersecurepassword") -> dict:
@@ -22,6 +23,18 @@ def _mock_entities(text: str) -> list[DetectedEntity]:
             confidence=0.99,
         )
     ]
+
+
+def _seed_usage(db: Session, user_id: int, token_cost: int, created_at: datetime | None = None) -> None:
+    db.add(UsageEvent(
+        user_id=user_id,
+        event_type=EventType.COMPREHEND_CHAR,
+        input_type=InputType.TEXT,
+        quantity=token_cost,
+        token_cost=token_cost,
+        created_at=created_at if created_at is not None else datetime.now(UTC).replace(tzinfo=None),
+    ))
+    db.commit()
 
 
 # --- POST /text/scan ---
@@ -374,3 +387,76 @@ def test_scan_api_key_resolves_to_correct_user(client: TestClient, db: Session) 
     ev = db.scalar(select(UsageEvent).where(UsageEvent.event_type == "COMPREHEND_CHAR"))
     assert ev is not None
     assert ev.user_id == user_a.id
+
+
+# --- Token limit enforcement ---
+
+
+def test_scan_429_when_at_token_limit(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 50_000)
+    response = client.post(
+        "/text/scan",
+        json={"text": "John Doe lives here"},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 429
+    detail = response.json()["detail"]
+    assert set(detail.keys()) == {"error", "tokens_used", "tokens_allowed", "resets_in_days"}
+    assert detail["error"] == "token_limit_reached"
+    assert detail["tokens_used"] == 50_000
+    assert detail["tokens_allowed"] == 50_000
+    assert 1 <= detail["resets_in_days"] <= 31
+
+
+def test_scan_allowed_when_under_token_limit(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 49_999)
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        response = client.post(
+            "/text/scan",
+            json={"text": "John Doe lives here"},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+
+
+def test_scan_ignores_usage_from_last_month(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 50_000, created_at=datetime(2020, 1, 1))
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        response = client.post(
+            "/text/scan",
+            json={"text": "John Doe lives here"},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+
+
+def test_scan_token_limit_isolated_per_user(client: TestClient, db: Session) -> None:
+    tokens_a = _register(client, "a@example.com")
+    _register(client, "b@example.com")
+    user_b_id = db.scalar(select(User).where(User.email == "b@example.com")).id
+    _seed_usage(db, user_b_id, 50_000)
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        response = client.post(
+            "/text/scan",
+            json={"text": "John Doe lives here"},
+            headers={"Authorization": f"Bearer {tokens_a['access_token']}"},
+        )
+    assert response.status_code == 200
+
+
+def test_redact_not_gated_by_token_limit(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    user_id = db.scalar(select(User).where(User.email == "user@example.com")).id
+    _seed_usage(db, user_id, 50_000)
+    response = client.post(
+        "/text/redact",
+        json={"text": "John Doe lives here", "entities": []},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 200
