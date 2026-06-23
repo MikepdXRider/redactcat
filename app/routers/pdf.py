@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user_any_auth
+from app.dependencies import enforce_token_limit, get_current_user_any_auth
 from app.models import Job, User
 from app.schemas import (
     BoundingBox,
@@ -72,7 +72,7 @@ def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list
 def scan_pdf(
     file: UploadFile,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_any_auth),
+    current_user: User = Depends(enforce_token_limit),
 ) -> PdfScanRead:
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="File must be a PDF")

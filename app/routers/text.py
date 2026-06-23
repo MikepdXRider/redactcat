@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_current_user_any_auth
+from app.dependencies import enforce_token_limit, get_current_user_any_auth
 from app.models import User
 from app.schemas import EventType, InputType, TextRedactRead, TextRedactRequest, TextScanRead, TextScanRequest
 from app.services.detection import detect_pii_entities
@@ -25,7 +25,7 @@ router = APIRouter(tags=["text"])
 def scan_text(
     body: TextScanRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_any_auth),
+    current_user: User = Depends(enforce_token_limit),
 ) -> TextScanRead:
     entities = detect_pii_entities(body.text)
     record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.TEXT, quantity=max(len(body.text), COMPREHEND_MIN_CHARS))

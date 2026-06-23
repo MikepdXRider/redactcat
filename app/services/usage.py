@@ -4,9 +4,13 @@ Records AWS service call costs as UsageEvent rows for the future billing
 enforcement layer. All recording is best-effort: a DB failure logs the error
 and rolls back, but never propagates to the caller — the user's request
 must complete regardless of whether the event was persisted.
+
+`billing_month_start` is shared by this module, the usage router, and the
+enforce_token_limit dependency so all three agree on the same billing period.
 """
 
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +29,13 @@ TOKEN_COST_PER_UNIT: dict[EventType, int] = {
     EventType.PDF_REDACTION: 0,
     EventType.TEXT_REDACTION: 0,
 }
+
+MONTHLY_TOKEN_LIMIT = 50_000
+
+
+def billing_month_start() -> datetime:
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def record_usage_event(

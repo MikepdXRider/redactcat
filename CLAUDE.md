@@ -137,8 +137,18 @@ For endpoints that should also accept a long-lived API key (currently `/text/*` 
 ```python
 from app.dependencies import get_current_user_any_auth
 
+@router.post("/redact")
+def redact(current_user: User = Depends(get_current_user_any_auth)) -> ...:
+    ...
+```
+
+For scan endpoints specifically, use `enforce_token_limit` instead of `get_current_user_any_auth`. It wraps `get_current_user_any_auth` and additionally checks the user's current calendar-month token usage against `MONTHLY_TOKEN_LIMIT` (50,000 tokens). Returns `429` with structured JSON if the budget is exhausted. Enforcement gates the scan step where AWS cost is incurred — redact endpoints are free and must not use this dependency. The billing window matches what `GET /usage/summary` reports, so the number a user sees in the summary is exactly the number checked against their limit.
+
+```python
+from app.dependencies import enforce_token_limit
+
 @router.post("/scan")
-def scan(current_user: User = Depends(get_current_user_any_auth)) -> ...:
+def scan(current_user: User = Depends(enforce_token_limit)) -> ...:
     ...
 ```
 

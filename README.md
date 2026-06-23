@@ -67,20 +67,21 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | POST | /auth/logout | ✓ | Delete refresh token row; invalidates session |
 | POST | /auth/refresh | — | Rotate refresh token; returns new token pair |
 | GET | /users/me | ✓ | Get current user profile |
-| GET | /usage/summary | ✓ | Token usage for the current calendar month and next reset date |
+| GET | /usage/summary | ✓ | Token usage, allowance, and remaining tokens for the current calendar month |
 | GET | /usage/history | ✓ | All usage events for the current calendar month, newest first |
 | PATCH | /users/me | ✓ | Update email or password |
 | DELETE | /users/me | ✓ | Delete account and all active sessions |
 | POST | /users/me/api-key | ✓† | Generate or rotate long-lived API key; returns the full key once |
 | GET | /users/me/api-key | ✓† | Get API key metadata (prefix, created_at, last_used_at); 404 if none exists |
 | DELETE | /users/me/api-key | ✓† | Revoke API key |
-| POST | /text/scan | ✓‡ | Detect PII entities in text; returns source text + entity list |
+| POST | /text/scan | ✓‡§ | Detect PII entities in text; returns source text + entity list |
 | POST | /text/redact | ✓‡ | Apply redactions to text; returns redacted string |
-| POST | /pdf/scan | ✓‡ | Upload single-page PDF; runs Textract (text PII), Rekognition (faces), and pyzbar (barcodes/QR); returns job_id + entities with bboxes |
+| POST | /pdf/scan | ✓‡§ | Upload single-page PDF; runs Textract (text PII), Rekognition (faces), and pyzbar (barcodes/QR); returns job_id + entities with bboxes |
 | POST | /pdf/redact | ✓‡ | Apply redactions to PDF; returns presigned download URL and expires_at; can be called multiple times per job |
 
 † JWT only — API keys cannot manage themselves.
 ‡ Accepts JWT or API key.
+§ Scan endpoints enforce a calendar-month token budget (50,000 tokens, resets on the 1st). Exceeding the budget returns `429 Too Many Requests` with `{"error": "token_limit_reached", "tokens_used": <n>, "tokens_allowed": 50000, "resets_in_days": <n>}`. Redact endpoints are not gated — enforcement applies only at the scan step where AWS cost is incurred.
 
 Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
 
