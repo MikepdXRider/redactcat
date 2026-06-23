@@ -9,11 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Job, User, UsageEvent
-from app.schemas import BoundingBox, DetectedEntity, EventType, InputType
+from app.schemas import BoundingBox, DetectedEntity
 from app.services.barcodes import BarcodeDetection
 from app.services.extraction import WordSpan
 from app.services.rekognition import FaceDetection
 from app.services.scheduler import JOB_TTL
+
+from conftest import _seed_usage
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "supersecurepassword") -> dict:
@@ -135,18 +137,6 @@ def _do_redact(client: TestClient, tokens: dict, scan: dict, pdf_bytes: bytes) -
             json={"job_id": scan["job_id"], "entities": scan["entities"]},
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
         ).json()
-
-
-def _seed_usage(db: Session, user_id: int, token_cost: int, created_at: datetime | None = None) -> None:
-    db.add(UsageEvent(
-        user_id=user_id,
-        event_type=EventType.TEXTRACT_PAGE,
-        input_type=InputType.PDF,
-        quantity=token_cost,
-        token_cost=token_cost,
-        created_at=created_at if created_at is not None else datetime.now(UTC).replace(tzinfo=None),
-    ))
-    db.commit()
 
 
 # --- POST /pdf/scan ---

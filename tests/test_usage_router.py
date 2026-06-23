@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import UsageEvent
-from app.services.usage import STRAY_TOKEN_LIMIT
+from app.services.usage import MONTHLY_TOKEN_LIMIT
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "supersecurepassword") -> dict:
@@ -89,7 +89,7 @@ def test_summary_reset_date_is_first_of_next_month(client: TestClient) -> None:
 def test_summary_tokens_allowed_is_limit(client: TestClient) -> None:
     tokens = _register(client)
     data = client.get("/usage/summary", headers=_auth(tokens)).json()
-    assert data["tokens_allowed"] == STRAY_TOKEN_LIMIT
+    assert data["tokens_allowed"] == MONTHLY_TOKEN_LIMIT
 
 
 def test_summary_tokens_remaining_reflects_usage(client: TestClient, db: Session) -> None:
@@ -99,7 +99,7 @@ def test_summary_tokens_remaining_reflects_usage(client: TestClient, db: Session
     db.commit()
     db.expire_all()
     data = client.get("/usage/summary", headers=_auth(tokens)).json()
-    assert data["tokens_remaining"] == STRAY_TOKEN_LIMIT - 1000
+    assert data["tokens_remaining"] == MONTHLY_TOKEN_LIMIT - 1000
 
 
 def test_summary_tokens_remaining_floors_at_zero(client: TestClient, db: Session) -> None:

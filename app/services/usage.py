@@ -30,7 +30,7 @@ TOKEN_COST_PER_UNIT: dict[EventType, int] = {
     EventType.TEXT_REDACTION: 0,
 }
 
-STRAY_TOKEN_LIMIT = 50_000
+MONTHLY_TOKEN_LIMIT = 50_000
 
 
 def billing_month_start() -> datetime:

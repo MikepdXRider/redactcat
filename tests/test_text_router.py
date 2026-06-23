@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -6,7 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import ApiKey, User, UsageEvent
-from app.schemas import DetectedEntity, EventType, InputType
+from app.schemas import DetectedEntity
+
+from conftest import _seed_usage
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "supersecurepassword") -> dict:
@@ -23,18 +25,6 @@ def _mock_entities(text: str) -> list[DetectedEntity]:
             confidence=0.99,
         )
     ]
-
-
-def _seed_usage(db: Session, user_id: int, token_cost: int, created_at: datetime | None = None) -> None:
-    db.add(UsageEvent(
-        user_id=user_id,
-        event_type=EventType.COMPREHEND_CHAR,
-        input_type=InputType.TEXT,
-        quantity=token_cost,
-        token_cost=token_cost,
-        created_at=created_at if created_at is not None else datetime.now(UTC).replace(tzinfo=None),
-    ))
-    db.commit()
 
 
 # --- POST /text/scan ---

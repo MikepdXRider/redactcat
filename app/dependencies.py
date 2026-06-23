@@ -25,7 +25,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import ApiKey, User, UsageEvent
 from app.services.auth import API_KEY_PREFIX, hash_api_key
-from app.services.usage import STRAY_TOKEN_LIMIT, billing_month_start
+from app.services.usage import MONTHLY_TOKEN_LIMIT, billing_month_start
 
 _bearer = HTTPBearer()
 
@@ -83,23 +83,23 @@ def enforce_token_limit(
     db: Session = Depends(get_db),
 ) -> User:
     # Best-effort: concurrent requests can both pass before either records usage; acceptable at this scale.
+    cutoff = billing_month_start()
     tokens_used = db.scalar(
-        select(func.sum(UsageEvent.token_cost)).where(
+        select(func.coalesce(func.sum(UsageEvent.token_cost), 0)).where(
             UsageEvent.user_id == user.id,
-            UsageEvent.created_at >= billing_month_start(),
+            UsageEvent.created_at >= cutoff,
         )
     ) or 0
-    if tokens_used >= STRAY_TOKEN_LIMIT:
-        now = datetime.now(UTC).replace(tzinfo=None)
-        next_month = now.month % 12 + 1
-        next_year = now.year + (1 if now.month == 12 else 0)
-        resets_in_days = (date(next_year, next_month, 1) - now.date()).days
+    if tokens_used >= MONTHLY_TOKEN_LIMIT:  # at-limit is blocked; >= is intentional
+        next_month = cutoff.month % 12 + 1
+        next_year = cutoff.year + (1 if cutoff.month == 12 else 0)
+        resets_in_days = (date(next_year, next_month, 1) - cutoff.date()).days
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
                 "error": "token_limit_reached",
                 "tokens_used": tokens_used,
-                "tokens_allowed": STRAY_TOKEN_LIMIT,
+                "tokens_allowed": MONTHLY_TOKEN_LIMIT,
                 "resets_in_days": resets_in_days,
             },
         )

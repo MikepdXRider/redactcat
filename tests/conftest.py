@@ -1,4 +1,6 @@
 # Pytest fixtures — in-memory SQLite engine, db session, and TestClient shared across the test suite
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -7,6 +9,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
+from app.models import UsageEvent
+from app.schemas import EventType, InputType
 
 _TEST_DATABASE_URL = "sqlite:///:memory:"
 
@@ -65,3 +69,15 @@ def client_no_raise(engine) -> TestClient:
     with _make_client(engine, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+def _seed_usage(db: Session, user_id: int, token_cost: int, created_at: datetime | None = None) -> None:
+    db.add(UsageEvent(
+        user_id=user_id,
+        event_type=EventType.COMPREHEND_CHAR,
+        input_type=InputType.TEXT,
+        quantity=token_cost,
+        token_cost=token_cost,
+        created_at=created_at if created_at is not None else datetime.now(UTC).replace(tzinfo=None),
+    ))
+    db.commit()
