@@ -5,8 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.models import RefreshToken
 
+PASSWORD = "supersecurepassword"
+NEW_PASSWORD = "newsecurepassword1"
 
-def _register(client: TestClient, email: str = "user@example.com", password: str = "secret123") -> dict:
+
+def _register(client: TestClient, email: str = "user@example.com", password: str = PASSWORD) -> dict:
     return client.post("/auth/register", json={"email": email, "password": password}).json()
 
 
@@ -57,11 +60,11 @@ def test_update_password_correct_current(client: TestClient) -> None:
     tokens = _register(client)
     response = client.patch(
         "/users/me",
-        json={"current_password": "secret123", "new_password": "newpassword1"},
+        json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
         headers=_auth(tokens),
     )
     assert response.status_code == 200
-    login = client.post("/auth/login", json={"email": "user@example.com", "password": "newpassword1"})
+    login = client.post("/auth/login", json={"email": "user@example.com", "password": NEW_PASSWORD})
     assert login.status_code == 200
 
 
@@ -69,7 +72,7 @@ def test_update_password_wrong_current(client: TestClient) -> None:
     tokens = _register(client)
     response = client.patch(
         "/users/me",
-        json={"current_password": "wrongpassword", "new_password": "newpassword1"},
+        json={"current_password": "wrongpassword", "new_password": NEW_PASSWORD},
         headers=_auth(tokens),
     )
     assert response.status_code == 401
@@ -77,7 +80,7 @@ def test_update_password_wrong_current(client: TestClient) -> None:
 
 def test_update_new_password_without_current_password(client: TestClient) -> None:
     tokens = _register(client)
-    response = client.patch("/users/me", json={"new_password": "newpassword1"}, headers=_auth(tokens))
+    response = client.patch("/users/me", json={"new_password": NEW_PASSWORD}, headers=_auth(tokens))
     assert response.status_code == 401
 
 
@@ -85,7 +88,7 @@ def test_update_new_password_too_short(client: TestClient) -> None:
     tokens = _register(client)
     response = client.patch(
         "/users/me",
-        json={"current_password": "secret123", "new_password": "short"},
+        json={"current_password": PASSWORD, "new_password": "short"},
         headers=_auth(tokens),
     )
     assert response.status_code == 422
@@ -120,9 +123,9 @@ def test_delete_me_access_token_rejected_after(client: TestClient) -> None:
 
 def test_delete_me_login_fails_after(client: TestClient) -> None:
     _register(client)
-    tokens = client.post("/auth/login", json={"email": "user@example.com", "password": "secret123"}).json()
+    tokens = client.post("/auth/login", json={"email": "user@example.com", "password": PASSWORD}).json()
     client.delete("/users/me", headers=_auth(tokens))
-    response = client.post("/auth/login", json={"email": "user@example.com", "password": "secret123"})
+    response = client.post("/auth/login", json={"email": "user@example.com", "password": PASSWORD})
     assert response.status_code == 401
 
 

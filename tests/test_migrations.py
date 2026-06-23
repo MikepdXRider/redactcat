@@ -70,7 +70,7 @@ def test_downgrade_drops_tables(tmp_path):
 def test_app_fails_without_migrations(tmp_path):
     db_url = f"sqlite:///{tmp_path}/test.db"
     with _client(db_url, raise_server_exceptions=False) as client:
-        r = client.post("/auth/register", json={"email": "a@b.com", "password": "secret123"})
+        r = client.post("/auth/register", json={"email": "a@b.com", "password": "supersecurepassword"})
         assert r.status_code == 500
 
 
@@ -78,6 +78,6 @@ def test_app_works_after_migrations(tmp_path):
     db_url = f"sqlite:///{tmp_path}/test.db"
     command.upgrade(_alembic_config(db_url), "head")
     with _client(db_url) as client:
-        r = client.post("/auth/register", json={"email": "a@b.com", "password": "secret123"})
+        r = client.post("/auth/register", json={"email": "a@b.com", "password": "supersecurepassword"})
         assert r.status_code == 201
         assert "access_token" in r.json()

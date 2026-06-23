@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import UsageEvent
 
 
-def _register(client: TestClient, email: str = "user@example.com", password: str = "secret123") -> dict:
+def _register(client: TestClient, email: str = "user@example.com", password: str = "supersecurepassword") -> dict:
     return client.post("/auth/register", json={"email": email, "password": password}).json()
 
 
