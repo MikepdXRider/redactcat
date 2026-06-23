@@ -4,7 +4,7 @@
 401 on any failure — any route that declares it as a Depends() is automatically
 protected.
 
-`get_current_user_accept_api_key` accepts either a JWT or a long-lived API key
+`get_current_user_any_auth` accepts either a JWT or a long-lived API key
 (prefixed with rcat_). On API key requests it updates last_used_at before
 returning the user, so usage attribution works identically to JWT auth.
 """
@@ -43,7 +43,7 @@ def get_current_user(
     return user
 
 
-def get_current_user_accept_api_key(
+def get_current_user_any_auth(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> User:

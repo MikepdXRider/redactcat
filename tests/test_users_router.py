@@ -243,7 +243,7 @@ def test_api_key_cannot_call_jwt_only_endpoints(client: TestClient) -> None:
     assert client.post("/users/me/api-key", headers={"Authorization": f"Bearer {key}"}).status_code == 401
 
 
-# NOTE: get_current_user_accept_api_key is not yet tested here because no endpoint
+# NOTE: get_current_user_any_auth is not yet tested here because no endpoint
 # currently uses it. Tests for valid API key auth, last_used_at updates, invalid key
 # rejection, and cross-user key isolation should be added when the first endpoint is
 # wired to accept API keys.
