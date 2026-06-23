@@ -8,7 +8,7 @@ never define them inside router or service files.
 from datetime import UTC, datetime
 
 from sqlalchemy import ForeignKey, Index, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -76,3 +76,4 @@ class ApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
+    user: Mapped[User] = relationship()

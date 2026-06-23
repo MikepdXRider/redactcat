@@ -20,7 +20,7 @@ from app.dependencies import get_current_user
 from app.models import ApiKey, RefreshToken, User
 from app.routers.auth import hash_password, verify_password
 from app.schemas import ApiKeyMetadataRead, ApiKeyRead, UserRead, UserUpdate
-from app.services.auth import API_KEY_PREFIX, hash_api_key
+from app.services.auth import API_KEY_PREFIX, KEY_PREFIX_DISPLAY_CHARS, hash_api_key
 
 router = APIRouter(tags=["users"])
 
@@ -69,7 +69,7 @@ def generate_or_rotate_api_key(
 ) -> ApiKeyRead:
     raw = secrets.token_urlsafe(32)
     full_key = API_KEY_PREFIX + raw
-    key_prefix = API_KEY_PREFIX + raw[:8]
+    key_prefix = API_KEY_PREFIX + raw[:KEY_PREFIX_DISPLAY_CHARS]
     db.execute(delete(ApiKey).where(ApiKey.user_id == current_user.id))
     db.add(ApiKey(user_id=current_user.id, key_hash=hash_api_key(full_key), key_prefix=key_prefix))
     db.commit()

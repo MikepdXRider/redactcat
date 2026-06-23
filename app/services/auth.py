@@ -8,6 +8,7 @@ routers/auth.py and dependencies.py.
 import hashlib
 
 API_KEY_PREFIX = "rcat_"
+KEY_PREFIX_DISPLAY_CHARS = 8
 
 
 def hash_api_key(key: str) -> str:

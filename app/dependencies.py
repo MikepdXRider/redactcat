@@ -15,7 +15,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.database import get_db
@@ -53,15 +53,20 @@ def get_current_user_any_auth(
     token = credentials.credentials
 
     if token.startswith(API_KEY_PREFIX):
-        api_key = db.scalar(select(ApiKey).where(ApiKey.key_hash == hash_api_key(token)))
+        api_key = db.scalar(
+            select(ApiKey)
+            .options(joinedload(ApiKey.user))
+            .where(ApiKey.key_hash == hash_api_key(token))
+        )
         if not api_key:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-        api_key.last_used_at = datetime.now(UTC).replace(tzinfo=None)
-        db.commit()
 
-        user = db.get(User, api_key.user_id)
+        user = api_key.user
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+        api_key.last_used_at = datetime.now(UTC).replace(tzinfo=None)
+        db.commit()
 
         return user
 
