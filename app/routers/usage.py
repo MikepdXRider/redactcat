@@ -15,7 +15,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import UsageEvent, User
 from app.schemas import UsageEventRead, UsageRead
-from app.services.usage import billing_month_start
+from app.services.usage import STRAY_TOKEN_LIMIT, billing_month_start
 
 router = APIRouter(tags=["usage"])
 
@@ -34,7 +34,13 @@ def get_usage_summary(
     ) or 0
     next_month = cutoff.month % 12 + 1
     next_year = cutoff.year + (1 if cutoff.month == 12 else 0)
-    return UsageRead(tokens_used=tokens_used, reset_date=date(next_year, next_month, 1))
+    tokens_remaining = max(0, STRAY_TOKEN_LIMIT - tokens_used)
+    return UsageRead(
+        tokens_used=tokens_used,
+        tokens_allowed=STRAY_TOKEN_LIMIT,
+        tokens_remaining=tokens_remaining,
+        reset_date=date(next_year, next_month, 1),
+    )
 
 
 @router.get("/history", response_model=list[UsageEventRead], status_code=status.HTTP_200_OK)

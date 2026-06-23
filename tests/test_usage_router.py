@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import UsageEvent
+from app.services.usage import STRAY_TOKEN_LIMIT
 
 
 def _register(client: TestClient, email: str = "user@example.com", password: str = "supersecurepassword") -> dict:
@@ -31,7 +32,7 @@ def test_summary_invalid_token(client: TestClient) -> None:
 def test_summary_shape(client: TestClient) -> None:
     tokens = _register(client)
     data = client.get("/usage/summary", headers=_auth(tokens)).json()
-    assert set(data.keys()) == {"tokens_used", "reset_date"}
+    assert set(data.keys()) == {"tokens_used", "tokens_allowed", "tokens_remaining", "reset_date"}
 
 
 def test_summary_zero_when_no_events(client: TestClient) -> None:
@@ -83,6 +84,32 @@ def test_summary_reset_date_is_first_of_next_month(client: TestClient) -> None:
     next_month = today.month % 12 + 1
     next_year = today.year + (1 if today.month == 12 else 0)
     assert data["reset_date"] == date(next_year, next_month, 1).isoformat()
+
+
+def test_summary_tokens_allowed_is_limit(client: TestClient) -> None:
+    tokens = _register(client)
+    data = client.get("/usage/summary", headers=_auth(tokens)).json()
+    assert data["tokens_allowed"] == STRAY_TOKEN_LIMIT
+
+
+def test_summary_tokens_remaining_reflects_usage(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    uid = _user_id(client, tokens)
+    db.add(UsageEvent(user_id=uid, event_type="COMPREHEND_CHAR", input_type="TEXT", quantity=1000, token_cost=1000))
+    db.commit()
+    db.expire_all()
+    data = client.get("/usage/summary", headers=_auth(tokens)).json()
+    assert data["tokens_remaining"] == STRAY_TOKEN_LIMIT - 1000
+
+
+def test_summary_tokens_remaining_floors_at_zero(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    uid = _user_id(client, tokens)
+    db.add(UsageEvent(user_id=uid, event_type="COMPREHEND_CHAR", input_type="TEXT", quantity=60_000, token_cost=60_000))
+    db.commit()
+    db.expire_all()
+    data = client.get("/usage/summary", headers=_auth(tokens)).json()
+    assert data["tokens_remaining"] == 0
 
 
 # --- GET /usage/history ---

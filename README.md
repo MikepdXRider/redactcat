@@ -67,7 +67,7 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | POST | /auth/logout | ✓ | Delete refresh token row; invalidates session |
 | POST | /auth/refresh | — | Rotate refresh token; returns new token pair |
 | GET | /users/me | ✓ | Get current user profile |
-| GET | /usage/summary | ✓ | Token usage for the current calendar month and next reset date |
+| GET | /usage/summary | ✓ | Token usage, allowance, and remaining tokens for the current calendar month |
 | GET | /usage/history | ✓ | All usage events for the current calendar month, newest first |
 | PATCH | /users/me | ✓ | Update email or password |
 | DELETE | /users/me | ✓ | Delete account and all active sessions |

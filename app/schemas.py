@@ -47,6 +47,8 @@ class InputType(StrEnum):
 
 class UsageRead(BaseModel):
     tokens_used: int
+    tokens_allowed: int
+    tokens_remaining: int
     reset_date: date
 
 
