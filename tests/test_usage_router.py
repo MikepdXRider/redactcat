@@ -1,4 +1,3 @@
-# Tests for /usage endpoints — summary and history
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient

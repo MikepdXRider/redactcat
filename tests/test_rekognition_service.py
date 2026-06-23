@@ -1,4 +1,3 @@
-# Unit tests for the Rekognition face detection service using botocore Stubber
 import pytest
 from botocore.stub import Stubber
 

@@ -1,4 +1,3 @@
-# Tests for app/services/usage.py — record_usage_event helper
 from unittest.mock import patch
 
 from sqlalchemy import select

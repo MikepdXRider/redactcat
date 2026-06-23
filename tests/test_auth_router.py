@@ -1,4 +1,3 @@
-# Tests for /auth endpoints — register, login, logout, and token refresh
 from datetime import datetime
 
 from fastapi.testclient import TestClient

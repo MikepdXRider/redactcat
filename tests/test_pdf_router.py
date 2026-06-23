@@ -1,4 +1,3 @@
-# Tests for /pdf endpoints — PDF scan and redact
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 

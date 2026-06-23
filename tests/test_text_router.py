@@ -1,4 +1,3 @@
-# Tests for /text endpoints — PII scan and redaction
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient

@@ -1,4 +1,3 @@
-# Tests for /users endpoints — profile read, update, delete, and API key management
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
