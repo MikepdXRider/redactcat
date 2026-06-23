@@ -49,6 +49,8 @@ class RefreshToken(Base):
 
 class UsageEvent(Base):
     __tablename__ = "usage_events"
+    # Composite index covers the common query: WHERE user_id = ? AND created_at >= ?
+    __table_args__ = (Index("ix_usage_events_user_created", "user_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -61,10 +63,6 @@ class UsageEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
-
-
-# Composite index covers the common query: WHERE user_id = ? AND created_at >= ?
-Index("ix_usage_events_user_created", UsageEvent.user_id, UsageEvent.created_at)
 
 
 class ApiKey(Base):

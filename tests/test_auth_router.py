@@ -287,3 +287,19 @@ def test_api_key_isolated_per_user(client: TestClient, db: Session) -> None:
     # User B has no key
     response = client.get("/auth/api-key", headers={"Authorization": f"Bearer {tokens_b['access_token']}"})
     assert response.status_code == 404
+
+
+# --- API key cannot manage itself ---
+
+def test_api_key_cannot_call_jwt_only_endpoints(client: TestClient) -> None:
+    tokens = _register(client)
+    key = client.post("/auth/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"}).json()["key"]
+    # /auth/api-key uses get_current_user (JWT-only); an API key must be rejected
+    response = client.post("/auth/api-key", headers={"Authorization": f"Bearer {key}"})
+    assert response.status_code == 401
+
+
+# NOTE: get_current_user_accept_api_key is not yet tested here because no endpoint
+# currently uses it. Tests for valid API key auth, last_used_at updates, invalid key
+# rejection, and cross-user key isolation should be added when the first endpoint is
+# wired to accept API keys.
