@@ -65,3 +65,16 @@ class UsageEvent(Base):
 
 # Composite index covers the common query: WHERE user_id = ? AND created_at >= ?
 Index("ix_usage_events_user_created", UsageEvent.user_id, UsageEvent.created_at)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    key_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    key_prefix: Mapped[str] = mapped_column(String)
+    last_used_at: Mapped[datetime | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(UTC).replace(tzinfo=None)
+    )

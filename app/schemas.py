@@ -148,3 +148,13 @@ class PdfRedactRequest(BaseModel):
 class PdfRedactRead(BaseModel):
     download_url: str
     expires_at: datetime
+
+
+class ApiKeyRead(BaseModel):
+    key: str
+
+
+class ApiKeyMetadataRead(BaseModel):
+    key_prefix: str
+    created_at: datetime
+    last_used_at: datetime | None

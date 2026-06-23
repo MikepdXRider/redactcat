@@ -3,6 +3,9 @@
 Stateless JWTs (30min access token) paired with rotating opaque refresh tokens
 stored in the DB. Each /refresh call replaces the old token row; /logout deletes
 it. The access token expires naturally — no blacklist needed.
+
+API keys are long-lived alternatives to JWTs for headless integrations. Only a
+JWT can generate or revoke an API key — the key cannot manage itself.
 """
 
 import secrets
@@ -11,14 +14,15 @@ from datetime import UTC, datetime, timedelta
 import bcrypt
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import RefreshToken, User
-from app.schemas import RefreshRequest, TokenRead, UserCreate, UserLogin
+from app.models import ApiKey, RefreshToken, User
+from app.schemas import ApiKeyMetadataRead, ApiKeyRead, RefreshRequest, TokenRead, UserCreate, UserLogin
+from app.services.auth import API_KEY_PREFIX, hash_api_key
 
 router = APIRouter(tags=["auth"])
 
@@ -116,3 +120,42 @@ def register(body: UserCreate, db: Session = Depends(get_db)) -> TokenRead:
         access_token=create_access_token(user.id),
         refresh_token=refresh_token,
     )
+
+
+@router.post("/api-key", response_model=ApiKeyRead, status_code=status.HTTP_201_CREATED)
+def generate_or_rotate_api_key(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ApiKeyRead:
+    raw = secrets.token_urlsafe(32)
+    full_key = API_KEY_PREFIX + raw
+    key_prefix = API_KEY_PREFIX + raw[:8]
+    db.execute(delete(ApiKey).where(ApiKey.user_id == current_user.id))
+    db.add(ApiKey(user_id=current_user.id, key_hash=hash_api_key(full_key), key_prefix=key_prefix))
+    db.commit()
+    return ApiKeyRead(key=full_key)
+
+
+@router.get("/api-key", response_model=ApiKeyMetadataRead)
+def get_api_key_metadata(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ApiKeyMetadataRead:
+    api_key = db.scalar(select(ApiKey).where(ApiKey.user_id == current_user.id))
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return ApiKeyMetadataRead(
+        key_prefix=api_key.key_prefix,
+        created_at=api_key.created_at,
+        last_used_at=api_key.last_used_at,
+    )
+
+
+@router.delete("/api-key", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_api_key(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    db.execute(delete(ApiKey).where(ApiKey.user_id == current_user.id))
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
