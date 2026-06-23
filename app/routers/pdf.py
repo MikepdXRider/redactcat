@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user_any_auth
 from app.models import Job, User
 from app.schemas import (
     BoundingBox,
@@ -72,7 +72,7 @@ def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list
 def scan_pdf(
     file: UploadFile,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_any_auth),
 ) -> PdfScanRead:
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="File must be a PDF")
@@ -180,7 +180,7 @@ def scan_pdf(
 def redact_pdf(
     body: PdfRedactRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_any_auth),
 ) -> PdfRedactRead:
     job = db.get(Job, body.job_id)
     if not job or job.user_id != current_user.id:

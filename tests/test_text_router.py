@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import UsageEvent
+from app.models import ApiKey, User, UsageEvent
 from app.schemas import DetectedEntity
 
 
@@ -302,3 +302,76 @@ def test_redact_records_text_redaction_event(client: TestClient, db: Session) ->
     assert ev.quantity == 1
     assert ev.token_cost == 0
     assert ev.job_id is None
+
+
+# --- API key auth ---
+
+
+def _api_key(client: TestClient, tokens: dict) -> str:
+    return client.post("/users/me/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"}).json()["key"]
+
+
+def test_scan_with_api_key(client: TestClient) -> None:
+    tokens = _register(client)
+    key = _api_key(client, tokens)
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        response = client.post(
+            "/text/scan",
+            json={"text": "Hello world here"},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    assert response.status_code == 200
+    assert "entities" in response.json()
+
+
+def test_redact_with_api_key(client: TestClient) -> None:
+    tokens = _register(client)
+    key = _api_key(client, tokens)
+    response = client.post(
+        "/text/redact",
+        json={"text": "John Doe lives here", "entities": [_entity("NAME", "John Doe", 0, 8)]},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["redacted_text"] == "[REDACTED] lives here"
+
+
+def test_scan_invalid_api_key_returns_401(client: TestClient) -> None:
+    response = client.post(
+        "/text/scan",
+        json={"text": "Hello world here"},
+        headers={"Authorization": "Bearer rcat_notarealkey"},
+    )
+    assert response.status_code == 401
+
+
+def test_scan_api_key_updates_last_used_at(client: TestClient, db: Session) -> None:
+    tokens = _register(client)
+    key = _api_key(client, tokens)
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        client.post(
+            "/text/scan",
+            json={"text": "Hello world here"},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    db.expire_all()
+    row = db.scalar(select(ApiKey))
+    assert row is not None
+    assert row.last_used_at is not None
+
+
+def test_scan_api_key_resolves_to_correct_user(client: TestClient, db: Session) -> None:
+    tokens_a = _register(client, "a@example.com")
+    _register(client, "b@example.com")
+    key_a = _api_key(client, tokens_a)
+    with patch("app.routers.text.detect_pii_entities", return_value=[]):
+        client.post(
+            "/text/scan",
+            json={"text": "Hello world here"},
+            headers={"Authorization": f"Bearer {key_a}"},
+        )
+    db.expire_all()
+    user_a = db.scalar(select(User).where(User.email == "a@example.com"))
+    ev = db.scalar(select(UsageEvent).where(UsageEvent.event_type == "COMPREHEND_CHAR"))
+    assert ev is not None
+    assert ev.user_id == user_a.id
