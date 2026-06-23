@@ -1,4 +1,3 @@
-# Unit tests for the Comprehend detection service using botocore Stubber
 import boto3
 from botocore.stub import Stubber
 from unittest.mock import patch

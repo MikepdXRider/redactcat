@@ -1,4 +1,3 @@
-# Unit tests for the PDF redaction service (apply_pdf_redactions)
 import fitz
 
 from app.schemas import BoundingBox, PdfEntityRead

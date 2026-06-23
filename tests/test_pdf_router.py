@@ -1,4 +1,3 @@
-# Tests for /pdf endpoints — PDF scan and redact
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -17,7 +16,7 @@ from app.services.rekognition import FaceDetection
 from app.services.scheduler import JOB_TTL
 
 
-def _register(client: TestClient, email: str = "user@example.com", password: str = "secret123") -> dict:
+def _register(client: TestClient, email: str = "user@example.com", password: str = "supersecurepassword") -> dict:
     return client.post("/auth/register", json={"email": email, "password": password}).json()
 
 
@@ -924,3 +923,48 @@ def test_redact_unique_key_per_call(client: TestClient, db: Session, one_page_pd
     assert len(uploaded_keys) == 2
     assert uploaded_keys[0] != uploaded_keys[1]
     assert all("redacted_" in k and k.endswith(".pdf") for k in uploaded_keys)
+
+
+# --- API key auth ---
+
+
+def _api_key(client: TestClient, tokens: dict) -> str:
+    return client.post("/users/me/api-key", headers={"Authorization": f"Bearer {tokens['access_token']}"}).json()["key"]
+
+
+def test_scan_pdf_with_api_key(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    key = _api_key(client, tokens)
+    with (
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
+        patch("app.routers.pdf.detect_faces", return_value=[]),
+        patch("app.routers.pdf.detect_barcodes", return_value=[]),
+    ):
+        response = client.post(
+            "/pdf/scan",
+            files={"file": ("test.pdf", one_page_pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    assert response.status_code == 200
+    assert "job_id" in response.json()
+
+
+def test_redact_pdf_with_api_key(client: TestClient, one_page_pdf: bytes) -> None:
+    tokens = _register(client)
+    key = _api_key(client, tokens)
+    scan = _do_scan(client, tokens, one_page_pdf)
+    with (
+        patch("app.routers.pdf.download_from_s3", return_value=one_page_pdf),
+        patch("app.routers.pdf.apply_pdf_redactions", return_value=b"redacted"),
+        patch("app.routers.pdf.upload_to_s3"),
+        patch("app.routers.pdf.generate_presigned_url", return_value="https://s3.example.com/redacted.pdf"),
+    ):
+        response = client.post(
+            "/pdf/redact",
+            json={"job_id": scan["job_id"], "entities": scan["entities"]},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    assert response.status_code == 200
+    assert "download_url" in response.json()
