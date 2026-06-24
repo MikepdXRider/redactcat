@@ -14,17 +14,28 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import UsageEvent, User
-from app.schemas import UsageEventRead, UsageRead
+from app.schemas import ErrorRead, UsageEventRead, UsageRead
 from app.services.usage import MONTHLY_TOKEN_LIMIT, billing_month_start
 
 router = APIRouter(tags=["usage"])
 
 
-@router.get("/summary", response_model=UsageRead, status_code=status.HTTP_200_OK)
+@router.get(
+    "/summary",
+    response_model=UsageRead,
+    status_code=status.HTTP_200_OK,
+    responses={401: {"model": ErrorRead, "description": "Invalid or expired token."}},
+)
 def get_usage_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UsageRead:
+    """Return token consumption for the current billing period.
+
+    The billing period is the current calendar month, resetting at midnight UTC on
+    the 1st. The values shown here are the same numbers checked by scan endpoints
+    when enforcing the monthly budget.
+    """
     cutoff = billing_month_start()
     # coalesce handles SQL NULL (SUM of zero rows); or 0 satisfies mypy since
     # db.scalar() is typed as int | None regardless of the query expression.
@@ -43,11 +54,21 @@ def get_usage_summary(
     )
 
 
-@router.get("/history", response_model=list[UsageEventRead], status_code=status.HTTP_200_OK)
+@router.get(
+    "/history",
+    response_model=list[UsageEventRead],
+    status_code=status.HTTP_200_OK,
+    responses={401: {"model": ErrorRead, "description": "Invalid or expired token."}},
+)
 def get_usage_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[UsageEvent]:
+    """Return usage events for the current billing period, newest first.
+
+    Each event records the AWS service called, the input type, the raw quantity
+    (characters, pages, or images), and the resulting token cost.
+    """
     cutoff = billing_month_start()
     return list(
         db.scalars(

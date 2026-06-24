@@ -36,12 +36,14 @@ from app.models import Job, User
 from app.schemas import (
     BoundingBox,
     EntitySource,
+    ErrorRead,
     EventType,
     InputType,
     PdfEntityRead,
     PdfRedactRead,
     PdfRedactRequest,
     PdfScanRead,
+    TokenLimitErrorRead,
 )
 from app.services.barcodes import detect_barcodes
 from app.services.detection import detect_pii_entities
@@ -68,12 +70,36 @@ def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list
     ]
 
 
-@router.post("/scan", response_model=PdfScanRead, status_code=status.HTTP_200_OK)
+@router.post(
+    "/scan",
+    response_model=PdfScanRead,
+    status_code=status.HTTP_200_OK,
+    responses={
+        401: {"model": ErrorRead, "description": "Invalid or expired token."},
+        413: {"model": ErrorRead, "description": "File exceeds 10 MB."},
+        422: {"model": ErrorRead, "description": "File is not a valid single-page PDF."},
+        429: {"model": TokenLimitErrorRead, "description": "Monthly token budget exhausted."},
+    },
+)
 def scan_pdf(
     file: UploadFile,
     db: Session = Depends(get_db),
     current_user: User = Depends(enforce_token_limit),
 ) -> PdfScanRead:
+    """Upload a single-page PDF and scan it for PII.
+
+    **Consumes tokens:**
+    - Textract: 1,500 per page (always)
+    - Comprehend: 1 per character, minimum 300
+    - Rekognition: 1,000 per image (only when the page contains embedded raster images)
+
+    The PDF is stored in S3 for approximately one hour (the job TTL). Use the
+    returned `job_id` with `POST /pdf/redact` to apply redactions within that window.
+    Face detection runs only when the page contains embedded raster images. QR code
+    and barcode detection always runs.
+
+    **Constraints:** single-page PDF, `Content-Type: application/pdf`, max 10 MB.
+    """
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="File must be a PDF")
 
@@ -176,12 +202,30 @@ def scan_pdf(
     )
 
 
-@router.post("/redact", response_model=PdfRedactRead, status_code=status.HTTP_200_OK)
+@router.post(
+    "/redact",
+    response_model=PdfRedactRead,
+    status_code=status.HTTP_200_OK,
+    responses={
+        401: {"model": ErrorRead, "description": "Invalid or expired token."},
+        404: {"model": ErrorRead, "description": "Job not found or belongs to another user."},
+        410: {"model": ErrorRead, "description": "Job has expired and the original PDF has been deleted."},
+    },
+)
 def redact_pdf(
     body: PdfRedactRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_any_auth),
 ) -> PdfRedactRead:
+    """Apply redactions to a previously scanned PDF.
+
+    Each call produces a unique redacted output file with its own pre-signed download
+    URL. Multiple redact calls on the same job are allowed — all output files coexist
+    until the job expires. Makes no AWS inference calls and consumes no tokens.
+
+    Returns 404 if the job belongs to another user. Returns 410 if the job TTL has
+    elapsed or the original PDF has already been deleted.
+    """
     job = db.get(Job, body.job_id)
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")

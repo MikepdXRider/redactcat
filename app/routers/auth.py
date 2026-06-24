@@ -18,7 +18,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import RefreshToken, User
-from app.schemas import RefreshRequest, TokenRead, UserCreate, UserLogin
+from app.schemas import ErrorRead, RefreshRequest, TokenRead, UserCreate, UserLogin
 
 router = APIRouter(tags=["auth"])
 
@@ -47,8 +47,18 @@ def store_refresh_token(user_id: int, db: Session) -> str:
     return token
 
 
-@router.post("/login", response_model=TokenRead)
+@router.post(
+    "/login",
+    response_model=TokenRead,
+    responses={401: {"model": ErrorRead, "description": "Invalid credentials."}},
+)
 def login(body: UserLogin, db: Session = Depends(get_db)) -> TokenRead:
+    """Authenticate with email and password.
+
+    Returns a JWT access token (valid 30 minutes) and a rotating refresh token.
+    Store the refresh token and use `POST /auth/refresh` to obtain a new pair before
+    the access token expires.
+    """
     user = db.scalar(select(User).where(User.email == body.email))
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -62,12 +72,24 @@ def login(body: UserLogin, db: Session = Depends(get_db)) -> TokenRead:
     )
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"model": ErrorRead, "description": "Invalid or expired access token."},
+        404: {"model": ErrorRead, "description": "Refresh token not found or belongs to another user."},
+    },
+)
 def logout(
     body: RefreshRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
+    """Invalidate a refresh token.
+
+    Deletes the refresh token from the server. The access token expires naturally
+    after its 30-minute window — no further action is needed.
+    """
     row = db.scalar(
         select(RefreshToken).where(
             RefreshToken.token == body.refresh_token,
@@ -82,8 +104,18 @@ def logout(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/refresh", response_model=TokenRead)
+@router.post(
+    "/refresh",
+    response_model=TokenRead,
+    responses={401: {"model": ErrorRead, "description": "Invalid or expired refresh token."}},
+)
 def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> TokenRead:
+    """Exchange a refresh token for a new token pair.
+
+    The old refresh token is deleted and a new one is issued. Call this before the
+    access token expires to maintain a session without re-entering credentials.
+    Returns 401 if the refresh token is invalid or expired.
+    """
     now = datetime.now(UTC).replace(tzinfo=None)
     row = db.scalar(select(RefreshToken).where(RefreshToken.token == body.refresh_token))
     if not row or row.expires_at < now:
@@ -100,8 +132,18 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> TokenRead:
     )
 
 
-@router.post("/register", response_model=TokenRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=TokenRead,
+    status_code=status.HTTP_201_CREATED,
+    responses={409: {"model": ErrorRead, "description": "Email is already registered."}},
+)
 def register(body: UserCreate, db: Session = Depends(get_db)) -> TokenRead:
+    """Create a new account and return a token pair.
+
+    Returns the same token pair as `POST /auth/login`. Returns 409 if the email
+    address is already associated with an account.
+    """
     if db.scalar(select(User).where(User.email == body.email)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 

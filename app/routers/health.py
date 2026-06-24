@@ -13,4 +13,5 @@ router = APIRouter(tags=["health"])
 
 @router.get("/", response_model=HealthRead)
 def health_check() -> HealthRead:
+    """Return service status."""
     return HealthRead(status="ok")
