@@ -93,7 +93,7 @@ def enforce_token_limit(
     if tokens_used >= MONTHLY_TOKEN_LIMIT:  # at-limit is blocked; >= is intentional
         next_month = cutoff.month % 12 + 1
         next_year = cutoff.year + (1 if cutoff.month == 12 else 0)
-        resets_in_days = (date(next_year, next_month, 1) - cutoff.date()).days
+        resets_in_days = (date(next_year, next_month, 1) - datetime.now(UTC).date()).days
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={

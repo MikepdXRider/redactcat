@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
 import fitz
@@ -990,7 +990,10 @@ def test_scan_pdf_429_when_at_token_limit(client: TestClient, db: Session, one_p
     assert detail["error"] == "token_limit_reached"
     assert detail["tokens_used"] == 50_000
     assert detail["tokens_allowed"] == 50_000
-    assert 1 <= detail["resets_in_days"] <= 31
+    now = datetime.now(UTC).date()
+    next_m = now.month % 12 + 1
+    next_y = now.year + (1 if now.month == 12 else 0)
+    assert detail["resets_in_days"] == (date(next_y, next_m, 1) - now).days
 
 
 def test_scan_pdf_allowed_when_under_token_limit(client: TestClient, db: Session, one_page_pdf: bytes) -> None:
