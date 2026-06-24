@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
+from app.routers.mcp import router as mcp_router
 from app.routers.pdf import router as pdf_router
 from app.routers.text import router as text_router
 from app.routers.usage import router as usage_router
@@ -69,6 +70,16 @@ The 429 token-limit error uses a structured `detail` object instead (see above).
 - File must begin with the `%PDF` magic bytes
 - Maximum size: **10 MB**
 - Only **single-page** PDFs are supported
+
+## MCP Integration
+
+Use RedactCat as a native tool in Claude Code, Claude Desktop, Cursor, or any MCP-compatible AI client.
+
+```bash
+curl -sSL https://api.redactcat.com/mcp/install.sh | bash
+```
+
+The install script creates an isolated Python environment, prompts for your API key, and prints the exact config entry to add to your client. See `GET /mcp/install.sh` and `GET /mcp/server.py` below.
 """
 
 _TAGS = [
@@ -91,6 +102,10 @@ _TAGS = [
     {
         "name": "usage",
         "description": "View the current billing period's token consumption and per-event history.",
+    },
+    {
+        "name": "mcp",
+        "description": "Download the MCP server and install script. One-liner setup: `curl -sSL https://api.redactcat.com/mcp/install.sh | bash`. Exposes five tools: `scan_text`, `redact_text`, `scan_pdf`, `redact_pdf`, `get_usage_summary`.",
     },
     {
         "name": "health",
@@ -118,3 +133,4 @@ app.include_router(users_router, prefix="/users")
 app.include_router(usage_router, prefix="/usage")
 app.include_router(text_router, prefix="/text")
 app.include_router(pdf_router, prefix="/pdf")
+app.include_router(mcp_router, prefix="/mcp")

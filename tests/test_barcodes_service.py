@@ -4,7 +4,6 @@
 from unittest.mock import patch
 
 import fitz
-import pytest
 from pyzbar.pyzbar import Decoded, Point, Rect
 
 from app.services.barcodes import detect_barcodes
@@ -42,11 +41,11 @@ def test_detect_barcodes_uses_polygon_for_bbox() -> None:
     result = results[0]
     assert result.entity_type == "QR_CODE"
     assert result.text == "https://example.com"
-    # bbox derived from polygon min/max, normalized by gray pixmap dimensions
-    assert pytest.approx(result.bbox.left) == 10 / pix.width
-    assert pytest.approx(result.bbox.top) == 20 / pix.height
-    assert pytest.approx(result.bbox.width) == (50 - 10) / pix.width
-    assert pytest.approx(result.bbox.height) == (60 - 20) / pix.height
+    # bbox derived from polygon min/max, normalized and rounded to 4 decimal places
+    assert result.bbox.left == round(10 / pix.width, 4)
+    assert result.bbox.top == round(20 / pix.height, 4)
+    assert result.bbox.width == round((50 - 10) / pix.width, 4)
+    assert result.bbox.height == round((60 - 20) / pix.height, 4)
 
 
 def test_detect_barcodes_falls_back_to_rect_when_polygon_empty() -> None:
@@ -64,11 +63,11 @@ def test_detect_barcodes_falls_back_to_rect_when_polygon_empty() -> None:
     result = results[0]
     assert result.entity_type == "BARCODE"
     assert result.text == "012345678905"
-    # bbox derived from rect, normalized by gray pixmap dimensions
-    assert pytest.approx(result.bbox.left) == 15 / pix.width
-    assert pytest.approx(result.bbox.top) == 25 / pix.height
-    assert pytest.approx(result.bbox.width) == 30 / pix.width
-    assert pytest.approx(result.bbox.height) == 35 / pix.height
+    # bbox derived from rect, normalized and rounded to 4 decimal places
+    assert result.bbox.left == round(15 / pix.width, 4)
+    assert result.bbox.top == round(25 / pix.height, 4)
+    assert result.bbox.width == round(30 / pix.width, 4)
+    assert result.bbox.height == round(35 / pix.height, 4)
 
 
 def test_detect_barcodes_no_codes_returns_empty() -> None:
