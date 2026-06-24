@@ -1,6 +1,8 @@
 # redactcat
 
-A FastAPI service for detecting and redacting PII from text and PDF documents. Users submit content; AWS Comprehend detects PII entities; users review and confirm redactions; the service returns redacted output. Text passes through in-memory — no PII is stored at any point. PDFs use ephemeral S3 storage between scan and redact, deleted immediately after the redacted file is delivered.
+**redactcat** is a deployed PII detection and redaction API. It accepts plain text and single-page PDFs and routes each through a multi-stage AWS detection pipeline — Comprehend for text PII, Textract for scanned PDFs, Rekognition for faces in embedded images, and pyzbar for barcodes and QR codes. Users review detected entities before redaction; no PII is stored in the database at any point.
+
+Live at `https://api.redactcat.com` · [Interactive docs](https://api.redactcat.com/docs)
 
 ## Tech Stack
 
@@ -21,7 +23,7 @@ A FastAPI service for detecting and redacting PII from text and PDF documents. U
 | Face detection | AWS Rekognition | Detects faces in embedded PDF images; sync inline-bytes API, no infrastructure to maintain |
 | Barcode/QR detection | pyzbar + libzbar0 | Decodes QR codes and barcodes rendered as vector or raster content on the page |
 
-## Architecture Decisions
+## Design Decisions
 
 **Stateless JWT + rotating refresh tokens**
 Access tokens are short-lived JWTs (30min) with no server-side storage. Refresh tokens are opaque strings stored in the `refresh_tokens` table. Each `/auth/refresh` call rotates the pair — the old row is deleted and a new token pair is issued. Logout is a single DB delete. This avoids a token blacklist while giving stolen refresh tokens only a one-use window before detection.
@@ -57,6 +59,32 @@ All ORM models and Pydantic schemas live in one file each. This avoids circular 
 **Direct bcrypt (no passlib)**
 passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 5.x (removed `__about__` attribute, strict 72-byte enforcement). bcrypt is used directly via `hashpw`/`checkpw`.
 
+## MCP Integration
+
+Use RedactCat as a native tool in Claude Desktop, Cursor, or any MCP-compatible AI client.
+
+```bash
+curl -sSL https://api.redactcat.com/mcp/install.sh | bash
+```
+
+The install script:
+1. Downloads the MCP server to `~/.redactcat-mcp/server.py`
+2. Creates an isolated Python venv with the required dependencies
+3. Prompts for your API key and saves it to `~/.redactcat-mcp/.env` (permissions: 600)
+4. Prints the exact config entry to add to your MCP client
+
+**Tools exposed:**
+
+| Tool | Description |
+|---|---|
+| `scan_text` | Detect PII in plain text (returns entities with offsets + confidence) |
+| `redact_text` | Replace detected entities with a redaction placeholder |
+| `scan_pdf` | Detect PII in a single-page PDF (text, faces, barcodes); returns job_id + bboxes |
+| `redact_pdf` | Generate a redacted PDF and return a pre-signed download URL |
+| `get_usage_summary` | Check current token usage and remaining monthly budget |
+
+The API key is stored locally and never sent through the AI's conversation context. A future `pip install redactcat-mcp` / `uvx redactcat-mcp` distribution is planned; the server script is structured as a package entry point so the migration requires only a `pyproject.toml`.
+
 ## API Reference
 
 | Method | Path | Auth | Description |
@@ -85,7 +113,7 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 ‡ Accepts JWT or API key.
 § Scan endpoints enforce a calendar-month token budget (50,000 tokens, resets on the 1st). Exceeding the budget returns `429 Too Many Requests` with `{"error": "token_limit_reached", "tokens_used": <n>, "tokens_allowed": 50000, "resets_in_days": <n>}`. Redact endpoints are not gated — enforcement applies only at the scan step where AWS cost is incurred.
 
-Interactive docs available at `http://localhost:8000/docs` when the dev server is running.
+Interactive docs available at `https://api.redactcat.com/docs`.
 
 ### Text workflow
 
@@ -114,87 +142,6 @@ Returns: { "download_url": "https://...", "expires_at": "..." } ← presigned S3
 ```
 
 The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. `source` is `COMPREHEND`, `REKOGNITION`, or `PYZBAR`. Bounding boxes are normalized (0–1 fractions of page dimensions) regardless of detection source. Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour (`expires_at`). The presigned URL TTL matches `expires_at` — all URLs from a job are valid until the job window closes and the Lambda deletes the underlying S3 objects. Multiple redact calls on the same job each produce a distinct output file.
-
-## Quickstart
-
-```bash
-# Install dependencies
-uv sync
-
-# Copy and fill in environment variables
-cp .env.example .env
-
-# Apply migrations to local DB
-uv run alembic upgrade head
-
-# Start the dev server (AWS_PROFILE required for Comprehend, Textract, S3)
-AWS_PROFILE=<your-profile> uv run uvicorn app.main:app --reload
-
-# Run tests
-uv run pytest
-
-# Lint
-uv run ruff check .
-
-# Type check
-uv run mypy app
-```
-
-### Local database
-
-```bash
-# Generate a migration after editing models
-uv run alembic revision --autogenerate -m "description"
-
-# Apply pending migrations
-uv run alembic upgrade head
-
-# Roll back all migrations (empty DB)
-uv run alembic downgrade base
-
-# Reset completely — delete the file and re-migrate
-rm redactcat.db && uv run alembic upgrade head
-```
-
-## MCP Integration
-
-Use RedactCat as a native tool in Claude Desktop, Cursor, or any MCP-compatible AI client.
-
-```bash
-curl -sSL https://api.redactcat.com/mcp/install.sh | bash
-```
-
-The install script:
-1. Downloads the MCP server to `~/.redactcat-mcp/server.py`
-2. Creates an isolated Python venv with the required dependencies
-3. Prompts for your API key and saves it to `~/.redactcat-mcp/.env` (permissions: 600)
-4. Prints the exact config entry to add to your MCP client
-
-**Tools exposed:**
-
-| Tool | Description |
-|---|---|
-| `scan_text` | Detect PII in plain text (returns entities with offsets + confidence) |
-| `redact_text` | Replace detected entities with a redaction placeholder |
-| `scan_pdf` | Detect PII in a single-page PDF (text, faces, barcodes); returns job_id + bboxes |
-| `redact_pdf` | Generate a redacted PDF and return a pre-signed download URL |
-| `get_usage_summary` | Check current token usage and remaining monthly budget |
-
-The API key is stored locally and never sent through the AI's conversation context. A future `pip install redactcat-mcp` / `uvx redactcat-mcp` distribution is planned; the server script is structured as a package entry point so the migration requires only a `pyproject.toml`.
-
-## Running with Docker
-
-Day-to-day development uses the local server (`uv run uvicorn app.main:app --reload`). Docker is for verifying the production image locally before deploying.
-
-```bash
-# Build
-docker build -t redactcat .
-
-# Run locally
-docker run --rm -p 8000:8000 --env-file .env redactcat
-```
-
-The CI/CD pipeline targets `linux/amd64` when pushing to ECR — no platform flag needed for local development.
 
 ## Infrastructure & Deployment
 
@@ -241,6 +188,61 @@ aws ssm put-parameter \
 ```
 
 Subsequent `terraform apply` runs will not overwrite these values. Only required again if the infrastructure is fully destroyed and rebuilt.
+
+## Quickstart
+
+```bash
+# Install dependencies
+uv sync
+
+# Copy and fill in environment variables
+cp .env.example .env
+
+# Apply migrations to local DB
+uv run alembic upgrade head
+
+# Start the dev server (AWS_PROFILE required for Comprehend, Textract, S3)
+AWS_PROFILE=<your-profile> uv run uvicorn app.main:app --reload
+
+# Run tests
+uv run pytest
+
+# Lint
+uv run ruff check .
+
+# Type check
+uv run mypy app
+```
+
+### Local database
+
+```bash
+# Generate a migration after editing models
+uv run alembic revision --autogenerate -m "description"
+
+# Apply pending migrations
+uv run alembic upgrade head
+
+# Roll back all migrations (empty DB)
+uv run alembic downgrade base
+
+# Reset completely — delete the file and re-migrate
+rm redactcat.db && uv run alembic upgrade head
+```
+
+## Running with Docker
+
+Day-to-day development uses the local server (`uv run uvicorn app.main:app --reload`). Docker is for verifying the production image locally before deploying.
+
+```bash
+# Build
+docker build -t redactcat .
+
+# Run locally
+docker run --rm -p 8000:8000 --env-file .env redactcat
+```
+
+The CI/CD pipeline targets `linux/amd64` when pushing to ECR — no platform flag needed for local development.
 
 ## Environment Variables
 
@@ -311,20 +313,6 @@ redactcat/
 └── pyproject.toml         # Dependencies and tool config
 ```
 
-## How It Works
-
-**Text:**
-1. **Scan** — user POSTs text to `/text/scan`; AWS Comprehend detects PII entities and returns them with character offsets and confidence scores
-2. **Review** — client filters the entity list (by type, confidence, or any other criteria)
-3. **Redact** — user POSTs the original text and selected entities to `/text/redact`; service applies substitutions and returns the redacted string
-
-**PDF:**
-1. **Scan** — user POSTs a single-page PDF to `/pdf/scan`; service uploads to S3, schedules a one-time EventBridge Lambda ~1 hour out, then runs three detection pipelines: Textract → Comprehend (text PII with word bboxes), Rekognition (faces in embedded images), and pyzbar (barcodes/QR codes from the rendered page). Returns `{ job_id, entities[], expires_at }` where each entity carries a `source` field
-2. **Review** — client filters the entity list
-3. **Redact** — user POSTs `{ job_id, entities[] }` to `/pdf/redact`; service checks TTL (410 if expired), downloads the PDF from S3, applies PyMuPDF black-box redactions, uploads to a unique key, and returns `{ download_url, expires_at }`. Can be called multiple times on the same job — each call produces a distinct file. The Lambda owns all cleanup at expiry: deletes every S3 object under the job prefix and the DB row
-
-See `CLAUDE.md` for contributor conventions.
-
 ## AI-Assisted Development
 
-This project is built with [Claude Code](https://claude.com/claude-code). Development conventions, architectural constraints, and contribution expectations are documented in `CLAUDE.md` — contributors are expected to read and follow it. All changes, regardless of how they were produced, are the responsibility of the person who commits them.
+Built with [Claude Code](https://claude.com/claude-code) as the primary development tool. All architecture, design decisions, and code review are the author's. Development conventions and architectural constraints are documented in `CLAUDE.md`.
