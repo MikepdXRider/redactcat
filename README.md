@@ -78,6 +78,8 @@ passlib's bcrypt backend raises a `ValueError` on initialization against bcrypt 
 | POST | /text/redact | ✓‡ | Apply redactions to text; returns redacted string |
 | POST | /pdf/scan | ✓‡§ | Upload single-page PDF; runs Textract (text PII), Rekognition (faces), and pyzbar (barcodes/QR); returns job_id + entities with bboxes |
 | POST | /pdf/redact | ✓‡ | Apply redactions to PDF; returns presigned download URL and expires_at; can be called multiple times per job |
+| GET | /mcp/server.py | — | Download the RedactCat MCP server script |
+| GET | /mcp/install.sh | — | Download the one-liner MCP install script |
 
 † JWT only — API keys cannot manage themselves.
 ‡ Accepts JWT or API key.
@@ -153,6 +155,32 @@ uv run alembic downgrade base
 # Reset completely — delete the file and re-migrate
 rm redactcat.db && uv run alembic upgrade head
 ```
+
+## MCP Integration
+
+Use RedactCat as a native tool in Claude Desktop, Cursor, or any MCP-compatible AI client.
+
+```bash
+curl -sSL https://api.redactcat.com/mcp/install.sh | bash
+```
+
+The install script:
+1. Downloads the MCP server to `~/.redactcat-mcp/server.py`
+2. Creates an isolated Python venv with the required dependencies
+3. Prompts for your API key and saves it to `~/.redactcat-mcp/.env` (permissions: 600)
+4. Prints the exact config entry to add to your MCP client
+
+**Tools exposed:**
+
+| Tool | Description |
+|---|---|
+| `scan_text` | Detect PII in plain text (returns entities with offsets + confidence) |
+| `redact_text` | Replace detected entities with a redaction placeholder |
+| `scan_pdf` | Detect PII in a single-page PDF (text, faces, barcodes); returns job_id + bboxes |
+| `redact_pdf` | Generate a redacted PDF and return a pre-signed download URL |
+| `get_usage_summary` | Check current token usage and remaining monthly budget |
+
+The API key is stored locally and never sent through the AI's conversation context. A future `pip install redactcat-mcp` / `uvx redactcat-mcp` distribution is planned; the server script is structured as a package entry point so the migration requires only a `pyproject.toml`.
 
 ## Running with Docker
 
@@ -240,9 +268,13 @@ redactcat/
 │   ├── main.py            # FastAPI app entry point — registers routers
 │   ├── models.py          # All SQLAlchemy ORM models
 │   ├── schemas.py         # All Pydantic request/response schemas
+│   ├── mcp/
+│   │   ├── server.py      # Standalone MCP server script (served as a download; not imported by the app)
+│   │   └── install.sh     # One-liner install script (served as a download)
 │   ├── routers/
 │   │   ├── auth.py        # Register, login, logout, token refresh
 │   │   ├── health.py      # Health check
+│   │   ├── mcp.py         # /mcp/server.py and /mcp/install.sh — public distribution endpoints
 │   │   ├── pdf.py         # PDF PII scan and redaction (stateful, S3-backed)
 │   │   ├── text.py        # Text PII scan and redaction (stateless)
 │   │   ├── usage.py       # /usage/summary and /usage/history — current-month token reporting
@@ -262,6 +294,7 @@ redactcat/
 │   ├── test_barcodes_service.py # pyzbar barcode service unit tests
 │   ├── test_detection_service.py # Comprehend service unit tests (botocore Stubber)
 │   ├── test_health_router.py    # Health check test
+│   ├── test_mcp_router.py       # /mcp/server.py and /mcp/install.sh endpoint tests
 │   ├── test_migrations.py       # Alembic upgrade/downgrade integration tests
 │   ├── test_pdf_router.py       # /pdf/scan and /pdf/redact endpoint tests
 │   ├── test_rekognition_service.py # Rekognition service unit tests (botocore Stubber)

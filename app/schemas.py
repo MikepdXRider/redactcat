@@ -8,10 +8,20 @@ defined once here and referenced by name.
 
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
 PASSWORD_MIN_LENGTH = 16
+
+# Floats in scan responses (bbox coordinates, confidence scores) are trimmed to 4
+# decimal places. Textract/Comprehend precision beyond that is noise — sub-pixel on
+# any page dimension — and the extra digits inflate MCP payloads significantly.
+def _round4(v: float) -> float:
+    return round(v, 4)
+
+
+_RoundedFloat = Annotated[float, AfterValidator(_round4)]
 
 
 class HealthRead(BaseModel):
@@ -106,7 +116,7 @@ class DetectedEntity(BaseModel):
     text: str = Field(description="The exact text identified as PII.", examples=["alice@example.com"])
     start_offset: int = Field(ge=0, description="Zero-indexed character offset of the first character of this entity in the original text.")
     end_offset: int = Field(ge=0, description="Character offset one past the last character of this entity (exclusive).")
-    confidence: float = Field(ge=0.0, le=1.0, description="Detection confidence score.", examples=[0.99])
+    confidence: _RoundedFloat = Field(ge=0.0, le=1.0, description="Detection confidence score.", examples=[0.9998])
 
 
 class TextScanRead(BaseModel):
@@ -125,10 +135,10 @@ class TextRedactRead(BaseModel):
 
 
 class BoundingBox(BaseModel):
-    left: float = Field(ge=0.0, le=1.0, description="Left edge as a fraction of page width (0.0–1.0).")
-    top: float = Field(ge=0.0, le=1.0, description="Top edge as a fraction of page height (0.0–1.0).")
-    width: float = Field(ge=0.0, le=1.0, description="Width as a fraction of page width (0.0–1.0).")
-    height: float = Field(ge=0.0, le=1.0, description="Height as a fraction of page height (0.0–1.0).")
+    left: _RoundedFloat = Field(ge=0.0, le=1.0, description="Left edge as a fraction of page width (0.0–1.0).")
+    top: _RoundedFloat = Field(ge=0.0, le=1.0, description="Top edge as a fraction of page height (0.0–1.0).")
+    width: _RoundedFloat = Field(ge=0.0, le=1.0, description="Width as a fraction of page width (0.0–1.0).")
+    height: _RoundedFloat = Field(ge=0.0, le=1.0, description="Height as a fraction of page height (0.0–1.0).")
 
 
 # Which detector produced a PdfEntityRead. The field is typed as this enum, so the

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_user_any_auth
 from app.models import UsageEvent, User
 from app.schemas import ErrorRead, UsageEventRead, UsageRead
 from app.services.usage import MONTHLY_TOKEN_LIMIT, billing_month_start
@@ -28,7 +28,7 @@ router = APIRouter(tags=["usage"])
 )
 def get_usage_summary(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_any_auth),
 ) -> UsageRead:
     """Return token consumption for the current billing period.
 

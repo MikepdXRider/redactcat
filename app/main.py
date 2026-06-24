@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
+from app.routers.mcp import router as mcp_router
 from app.routers.pdf import router as pdf_router
 from app.routers.text import router as text_router
 from app.routers.usage import router as usage_router
@@ -93,6 +94,10 @@ _TAGS = [
         "description": "View the current billing period's token consumption and per-event history.",
     },
     {
+        "name": "mcp",
+        "description": "Download the MCP server script and install script to connect RedactCat as a native tool in any MCP-compatible AI client.",
+    },
+    {
         "name": "health",
         "description": "Service health check.",
     },
@@ -118,3 +123,4 @@ app.include_router(users_router, prefix="/users")
 app.include_router(usage_router, prefix="/usage")
 app.include_router(text_router, prefix="/text")
 app.include_router(pdf_router, prefix="/pdf")
+app.include_router(mcp_router, prefix="/mcp")
