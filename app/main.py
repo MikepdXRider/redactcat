@@ -70,6 +70,16 @@ The 429 token-limit error uses a structured `detail` object instead (see above).
 - File must begin with the `%PDF` magic bytes
 - Maximum size: **10 MB**
 - Only **single-page** PDFs are supported
+
+## MCP Integration
+
+Use RedactCat as a native tool in Claude Code, Claude Desktop, Cursor, or any MCP-compatible AI client.
+
+```bash
+curl -sSL https://api.redactcat.com/mcp/install.sh | bash
+```
+
+The install script creates an isolated Python environment, prompts for your API key, and prints the exact config entry to add to your client. See `GET /mcp/install.sh` and `GET /mcp/server.py` below.
 """
 
 _TAGS = [
@@ -95,7 +105,7 @@ _TAGS = [
     },
     {
         "name": "mcp",
-        "description": "Download the MCP server script and install script to connect RedactCat as a native tool in any MCP-compatible AI client.",
+        "description": "Download the MCP server and install script. One-liner setup: `curl -sSL https://api.redactcat.com/mcp/install.sh | bash`. Exposes five tools: `scan_text`, `redact_text`, `scan_pdf`, `redact_pdf`, `get_usage_summary`.",
     },
     {
         "name": "health",
