@@ -35,7 +35,6 @@ from app.database import get_db
 from app.dependencies import enforce_token_limit, get_current_user_any_auth
 from app.models import Job, User
 from app.schemas import (
-    BoundingBox,
     EntitySource,
     ErrorRead,
     EventType,
@@ -48,7 +47,7 @@ from app.schemas import (
 )
 from app.services.barcodes import detect_barcodes
 from app.services.detection import detect_pii_entities
-from app.services.extraction import WordSpan, extract_text_from_s3_object
+from app.services.extraction import bboxes_for_entity, extract_text_from_s3_object
 from app.services.redaction import apply_pdf_redactions
 from app.services.rekognition import detect_faces
 from app.services.scheduler import JOB_TTL, schedule_job_expiry
@@ -61,14 +60,6 @@ router = APIRouter(tags=["pdf"])
 
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 _ORIGINAL_FILENAME = "original.pdf"
-
-
-def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list[BoundingBox]:
-    return [
-        BoundingBox(left=ws.left, top=ws.top, width=ws.width, height=ws.height)
-        for ws in word_spans
-        if ws.start_char < end and ws.end_char > start
-    ]
 
 
 @router.post(
@@ -168,7 +159,7 @@ def scan_pdf(
             start_offset=e.start_offset,
             end_offset=e.end_offset,
             confidence=e.confidence,
-            bboxes=_bboxes_for_entity(e.start_offset, e.end_offset, word_spans),
+            bboxes=bboxes_for_entity(e.start_offset, e.end_offset, word_spans),
         )
         for e in raw_entities
     ]

@@ -31,7 +31,6 @@ from app.database import get_db
 from app.dependencies import enforce_token_limit, get_current_user_any_auth
 from app.models import Job, User
 from app.schemas import (
-    BoundingBox,
     EntitySource,
     ErrorRead,
     EventType,
@@ -44,7 +43,7 @@ from app.schemas import (
 )
 from app.services.barcodes import detect_barcodes
 from app.services.detection import detect_pii_entities
-from app.services.extraction import WordSpan, extract_text_from_s3_object
+from app.services.extraction import bboxes_for_entity, extract_text_from_s3_object
 from app.services.image_redaction import apply_image_redactions
 from app.services.rekognition import detect_faces
 from app.services.scheduler import JOB_TTL, schedule_job_expiry
@@ -62,14 +61,6 @@ _MAGIC_BYTES = {
     "image/jpeg": b"\xff\xd8\xff",
     "image/png": b"\x89PNG",
 }
-
-
-def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list[BoundingBox]:
-    return [
-        BoundingBox(left=ws.left, top=ws.top, width=ws.width, height=ws.height)
-        for ws in word_spans
-        if ws.start_char < end and ws.end_char > start
-    ]
 
 
 @router.post(
@@ -124,11 +115,16 @@ def scan_image(
     s3_key = f"images/{current_user.id}/{secrets.token_urlsafe(16)}/original.{ext}"
     upload_to_s3(image_bytes, settings.S3_BUCKET, s3_key)
 
+    # Schedule Lambda cleanup ~1 hour out. Best-effort: a failure here must not fail the scan.
+    # The S3 lifecycle rule (1-day expiration) is the fallback.
     try:
         schedule_job_expiry(s3_key)
     except Exception:
         logger.warning("failed to schedule job expiry for token=%s", s3_key.split("/")[2])
 
+    # Job row is created only after all calls succeed. If any raises, the S3 object is
+    # orphaned — the Lambda cleans it up if scheduling succeeded; the lifecycle rule (1-day)
+    # is the fallback if scheduling failed.
     text, word_spans = extract_text_from_s3_object(settings.S3_BUCKET, s3_key)
     raw_entities = detect_pii_entities(text)
     face_detections = detect_faces(image_bytes)
@@ -152,7 +148,7 @@ def scan_image(
             start_offset=e.start_offset,
             end_offset=e.end_offset,
             confidence=e.confidence,
-            bboxes=_bboxes_for_entity(e.start_offset, e.end_offset, word_spans),
+            bboxes=bboxes_for_entity(e.start_offset, e.end_offset, word_spans),
         )
         for e in raw_entities
     ]

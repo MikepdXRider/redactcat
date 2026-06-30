@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import boto3
 
+from app.schemas import BoundingBox
+
 _textract = boto3.client("textract")
 
 
@@ -25,6 +27,14 @@ class WordSpan:
     top: float
     width: float
     height: float
+
+
+def bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list[BoundingBox]:
+    return [
+        BoundingBox(left=ws.left, top=ws.top, width=ws.width, height=ws.height)
+        for ws in word_spans
+        if ws.start_char < end and ws.end_char > start
+    ]
 
 
 def extract_text_from_s3_object(bucket: str, key: str) -> tuple[str, list[WordSpan]]:
