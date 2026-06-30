@@ -50,6 +50,7 @@ class EventType(StrEnum):
     - `REKOGNITION_FACE`: one image analyzed by Amazon Rekognition for faces (1,000 tokens)
     - `PDF_REDACTION`: a PDF redaction call (0 tokens)
     - `TEXT_REDACTION`: a text redaction call (0 tokens)
+    - `IMAGE_REDACTION`: an image redaction call (0 tokens)
     """
 
     TEXTRACT_PAGE = "TEXTRACT_PAGE"
@@ -57,11 +58,13 @@ class EventType(StrEnum):
     REKOGNITION_FACE = "REKOGNITION_FACE"
     PDF_REDACTION = "PDF_REDACTION"
     TEXT_REDACTION = "TEXT_REDACTION"
+    IMAGE_REDACTION = "IMAGE_REDACTION"
 
 
 class InputType(StrEnum):
     PDF = "PDF"
     TEXT = "TEXT"
+    IMAGE = "IMAGE"
 
 
 class UsageRead(BaseModel):
@@ -76,7 +79,7 @@ class UsageEventRead(BaseModel):
 
     id: int = Field(description="Internal event ID.")
     event_type: EventType = Field(description="The AWS service call that generated this event.")
-    input_type: InputType = Field(description="Whether the input was a PDF or plain text.")
+    input_type: InputType = Field(description="Whether the input was a PDF, plain text, or image.")
     quantity: int = Field(ge=0, description="Units consumed (characters for Comprehend, pages for Textract, image count for Rekognition).")
     token_cost: int = Field(ge=0, description="Tokens charged for this event (`quantity × cost_per_unit`; 0 for redaction events).")
     job_id: int | None = Field(description="ID of the PDF job this event belongs to. Null for text events.")
@@ -175,6 +178,27 @@ class PdfRedactRequest(BaseModel):
 
 class PdfRedactRead(BaseModel):
     download_url: str = Field(description="Pre-signed S3 URL for the redacted PDF. Valid until `expires_at` — download promptly.")
+    expires_at: datetime = Field(description="UTC datetime when the download URL and job expire (ISO 8601).", examples=["2026-06-23T15:30:00"])
+
+
+class ImageEntityRead(PdfEntityRead):
+    source: EntitySource = Field(description="Which detector found this entity: `COMPREHEND` (text PII) or `REKOGNITION` (face).")
+    bboxes: list[BoundingBox] = Field(description="Image-relative bounding boxes in normalized coordinates. One box per word for text entities; one box for faces.")
+
+
+class ImageScanRead(BaseModel):
+    job_id: int = Field(description="Job identifier. Pass to `POST /image/redact` to apply redactions within the TTL window.")
+    entities: list[ImageEntityRead] = Field(description="Detected entities with bounding boxes. Pass this list (or a filtered subset) to `POST /image/redact`.")
+    expires_at: datetime = Field(description="UTC datetime when the job and original image are deleted (approximately 1 hour after scan, ISO 8601).", examples=["2026-06-23T15:30:00"])
+
+
+class ImageRedactRequest(BaseModel):
+    job_id: int = Field(description="The `job_id` returned by `POST /image/scan`.")
+    entities: list[ImageEntityRead] = Field(description="Entities to redact. Pass the scan response or a filtered subset.")
+
+
+class ImageRedactRead(BaseModel):
+    download_url: str = Field(description="Pre-signed S3 URL for the redacted image. Valid until `expires_at` — download promptly.")
     expires_at: datetime = Field(description="UTC datetime when the download URL and job expire (ISO 8601).", examples=["2026-06-23T15:30:00"])
 
 

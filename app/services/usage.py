@@ -28,6 +28,7 @@ TOKEN_COST_PER_UNIT: dict[EventType, int] = {
     EventType.REKOGNITION_FACE: 1000,
     EventType.PDF_REDACTION: 0,
     EventType.TEXT_REDACTION: 0,
+    EventType.IMAGE_REDACTION: 0,
 }
 
 MONTHLY_TOKEN_LIMIT = 50_000

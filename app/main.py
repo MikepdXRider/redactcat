@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
+from app.routers.image import router as image_router
 from app.routers.mcp import router as mcp_router
 from app.routers.pdf import router as pdf_router
 from app.routers.text import router as text_router
@@ -17,14 +18,14 @@ from app.routers.usage import router as usage_router
 from app.routers.users import router as users_router
 
 _DESCRIPTION = """
-**redactcat** detects and redacts PII from plain text and single-page PDFs.
+**redactcat** detects and redacts PII from plain text, single-page PDFs, and images.
 
 ## Authentication
 
 All endpoints require a `Bearer` token in the `Authorization` header. Two token types are accepted:
 
 - **JWT access token** — returned by `POST /auth/login` and `POST /auth/register`. Valid for 30 minutes.
-- **Long-lived API key** — generated via `POST /users/me/api-key`, prefixed with `rcat_`. Accepted on `/text/*` and `/pdf/*` endpoints; not accepted on `/users/*` or `/auth/*` account management endpoints.
+- **Long-lived API key** — generated via `POST /users/me/api-key`, prefixed with `rcat_`. Accepted on `/text/*`, `/pdf/*`, and `/image/*` endpoints; not accepted on `/users/*` or `/auth/*` account management endpoints.
 
 ```
 Authorization: Bearer <token_or_api_key>
@@ -39,8 +40,11 @@ Each account has a monthly budget of **50,000 tokens**. Scan endpoints consume t
 | Text scan (Comprehend) | 1 per character, min 300 billed |
 | PDF scan — page (Textract) | 1,500 per page |
 | PDF scan — faces (Rekognition) | 1,000 per image |
+| Image scan — page (Textract) | 1,500 per image |
+| Image scan — faces (Rekognition) | 1,000 per image |
 | PDF redact | 0 |
 | Text redact | 0 |
+| Image redact | 0 |
 
 When the budget is exhausted, scan endpoints return **429** with a structured body:
 
@@ -52,7 +56,7 @@ When the budget is exhausted, scan endpoints return **429** with a structured bo
 
 **Text** is processed in memory only — no PII is written to the database or storage.
 
-**PDFs** are stored ephemerally in S3 and deleted automatically approximately **1 hour** after scanning (the job TTL). The `expires_at` field in scan and redact responses marks this deadline.
+**PDFs and images** are stored ephemerally in S3 and deleted automatically approximately **1 hour** after scanning (the job TTL). The `expires_at` field in scan and redact responses marks this deadline.
 
 ## Error Responses
 
@@ -70,6 +74,12 @@ The 429 token-limit error uses a structured `detail` object instead (see above).
 - File must begin with the `%PDF` magic bytes
 - Maximum size: **10 MB**
 - Only **single-page** PDFs are supported
+
+## Image File Constraints
+
+- `Content-Type` must be `image/jpeg` or `image/png`
+- File must begin with valid JPEG or PNG magic bytes
+- Maximum size: **5 MB** (Textract synchronous + Rekognition inline limit)
 
 ## MCP Integration
 
@@ -98,6 +108,10 @@ _TAGS = [
     {
         "name": "pdf",
         "description": "Stateful PII scan and redact for single-page PDFs. PDFs are stored ephemerally in S3 for approximately one hour. Scan once, redact as many versions as needed within the TTL window.",
+    },
+    {
+        "name": "image",
+        "description": "Stateful PII scan and redact for JPEG and PNG images. Images are stored ephemerally in S3 for approximately one hour. Scan once, redact as many versions as needed within the TTL window.",
     },
     {
         "name": "usage",
@@ -133,4 +147,5 @@ app.include_router(users_router, prefix="/users")
 app.include_router(usage_router, prefix="/usage")
 app.include_router(text_router, prefix="/text")
 app.include_router(pdf_router, prefix="/pdf")
+app.include_router(image_router, prefix="/image")
 app.include_router(mcp_router, prefix="/mcp")
