@@ -113,7 +113,7 @@ def mock_schedule_job_expiry():
 def _do_scan(client: TestClient, tokens: dict, one_page_pdf: bytes) -> dict:
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -204,7 +204,7 @@ def test_scan_returns_entities(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -238,7 +238,7 @@ def test_scan_no_entities(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("Nothing sensitive", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("Nothing sensitive", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -259,7 +259,7 @@ def test_scan_aws_failure_does_not_create_job(client_no_raise: TestClient, db: S
     tokens = _register(client_no_raise)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", side_effect=Exception("Textract unavailable")),
+        patch("app.routers.pdf.extract_text_from_s3_object", side_effect=Exception("Textract unavailable")),
     ):
         response = client_no_raise.post(
             "/pdf/scan",
@@ -275,7 +275,7 @@ def test_scan_creates_job_in_db(client: TestClient, db: Session, one_page_pdf: b
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -301,7 +301,7 @@ def test_scan_no_images_rekognition_not_called(client: TestClient, one_page_pdf:
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("text", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("text", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces") as mock_detect_faces,
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -320,7 +320,7 @@ def test_scan_with_images_face_detected(client: TestClient, one_page_pdf_with_im
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -352,7 +352,7 @@ def test_scan_rekognition_failure_does_not_create_job(
     tokens = _register(client_no_raise)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", side_effect=Exception("Rekognition unavailable")),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -371,7 +371,7 @@ def test_scan_with_images_no_faces(client: TestClient, one_page_pdf_with_image: 
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -390,7 +390,7 @@ def test_redact_face_entity(client: TestClient, one_page_pdf_with_image: bytes) 
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -424,7 +424,7 @@ def test_scan_no_barcodes(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("text", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("text", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]) as mock_detect_barcodes,
@@ -444,7 +444,7 @@ def test_scan_qr_code_detected(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=_mock_qr_code()),
@@ -474,7 +474,7 @@ def test_scan_barcode_detected(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=_mock_barcode()),
@@ -501,7 +501,7 @@ def test_redact_pyzbar_entity(client: TestClient, one_page_pdf: bytes) -> None:
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=_mock_qr_code()),
@@ -533,7 +533,7 @@ def test_redact_mixed_source_entities(client: TestClient, one_page_pdf: bytes) -
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=_mock_qr_code()),
@@ -570,7 +570,7 @@ def test_scan_barcode_failure_does_not_create_job(
     tokens = _register(client_no_raise)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", side_effect=Exception("Pyzbar unavailable")),
@@ -732,7 +732,7 @@ def test_scan_records_textract_and_comprehend_events(client: TestClient, db: Ses
     text = "John Doe lives"
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=(text, _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=(text, _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -769,7 +769,7 @@ def test_scan_records_rekognition_event_when_images_present(
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=_mock_face()),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -798,7 +798,7 @@ def test_scan_no_rekognition_event_without_images(
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -836,7 +836,7 @@ def test_scan_calls_schedule_job_expiry(client: TestClient, one_page_pdf: bytes)
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -859,7 +859,7 @@ def test_scan_scheduler_failure_does_not_fail_scan(client: TestClient, one_page_
     tokens = _register(client)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("", [])),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("", [])),
         patch("app.routers.pdf.detect_pii_entities", return_value=[]),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -939,7 +939,7 @@ def test_scan_pdf_with_api_key(client: TestClient, one_page_pdf: bytes) -> None:
     key = _api_key(client, tokens)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -1002,7 +1002,7 @@ def test_scan_pdf_allowed_when_under_token_limit(client: TestClient, db: Session
     _seed_usage(db, user_id, 49_999)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -1021,7 +1021,7 @@ def test_scan_pdf_ignores_usage_from_last_month(client: TestClient, db: Session,
     _seed_usage(db, user_id, 50_000, created_at=datetime(2020, 1, 1))
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),
@@ -1041,7 +1041,7 @@ def test_scan_pdf_token_limit_isolated_per_user(client: TestClient, db: Session,
     _seed_usage(db, user_b_id, 50_000)
     with (
         patch("app.routers.pdf.upload_to_s3"),
-        patch("app.routers.pdf.extract_text_from_pdf_s3", return_value=("John Doe lives", _mock_word_spans())),
+        patch("app.routers.pdf.extract_text_from_s3_object", return_value=("John Doe lives", _mock_word_spans())),
         patch("app.routers.pdf.detect_pii_entities", side_effect=_mock_entities),
         patch("app.routers.pdf.detect_faces", return_value=[]),
         patch("app.routers.pdf.detect_barcodes", return_value=[]),

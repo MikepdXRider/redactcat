@@ -16,6 +16,7 @@ dependencies = [
     "boto3>=1.35",
     "psycopg2-binary>=2.9.12",
     "alembic>=1.13",
+    "pillow>=11.0",
     "pymupdf>=1.27.2.3",
     "pyzbar>=0.1.9",
 ]

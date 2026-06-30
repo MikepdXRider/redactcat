@@ -132,7 +132,7 @@ def my_endpoint(current_user: User = Depends(get_current_user)) -> ...:
     ...
 ```
 
-For endpoints that should also accept a long-lived API key (currently `/text/*` and `/pdf/*`), use `get_current_user_any_auth` instead. It detects the `rcat_` prefix and dispatches to either the API key or JWT path. Both paths return a `User` object, so handlers are auth-method-agnostic. Use `get_current_user` (JWT-only) for all account management endpoints — a key must not be able to rotate or revoke itself.
+For endpoints that should also accept a long-lived API key (currently `/text/*`, `/pdf/*`, and `/image/*`), use `get_current_user_any_auth` instead. It detects the `rcat_` prefix and dispatches to either the API key or JWT path. Both paths return a `User` object, so handlers are auth-method-agnostic. Use `get_current_user` (JWT-only) for all account management endpoints — a key must not be able to rotate or revoke itself.
 
 ```python
 from app.dependencies import get_current_user_any_auth
@@ -198,21 +198,27 @@ Text passes through in-memory — no PII is written to the database or S3 at any
 
 The scan response shape matches the redact request body exactly, so the client can POST the scan response directly to redact without reshaping. `replacement` defaults to `"[REDACTED]"`; empty string deletes PII.
 
-PDF is a separate stateful flow (`/pdf/*`) backed by S3 ephemeral storage. A Job is a 1-hour session window — scan once, redact as many versions as needed within the TTL:
+PDF and image are separate stateful flows (`/pdf/*`, `/image/*`) backed by S3 ephemeral storage. Both share the same `Job` model and Lambda cleanup pattern. A Job is a 1-hour session window — scan once, redact as many versions as needed within the TTL:
 
-1. `POST /pdf/scan` — validates single-page PDF, uploads to S3, schedules a one-time EventBridge Scheduler Lambda ~1 hour out, extracts text via Textract, detects PII with Comprehend, maps character offsets to word-level bboxes, returns `{ job_id, entities[], expires_at }` with bboxes embedded. Scheduling is best-effort; if it fails, the scan still succeeds and the S3 lifecycle rule is the fallback.
+**PDF flow:**
+1. `POST /pdf/scan` — validates single-page PDF, uploads to S3 (`pdfs/{user_id}/{token}/original.pdf`), schedules a one-time EventBridge Scheduler Lambda ~1 hour out, extracts text via Textract, detects PII with Comprehend, maps character offsets to word-level bboxes, returns `{ job_id, entities[], expires_at }` with bboxes embedded. Scheduling is best-effort; if it fails, the scan still succeeds and the S3 lifecycle rule is the fallback.
 2. Client filters entities
 3. `POST /pdf/redact` — checks job ownership (404) and TTL (410), applies PyMuPDF redactions, uploads to a unique key `redacted_{token}.pdf` within the job prefix, returns `{ download_url, expires_at }`. Does **not** delete the Job row or original S3 object — multiple redact calls on the same job produce distinct output files that coexist under the prefix. Lambda owns all cleanup at expiry.
 
-The Lambda fires at `job.created_at + JOB_TTL`, deletes every S3 object under the job prefix (original + all redacted versions), and deletes the Job row. Orphaned S3 objects (where the Job row was never committed) are also cleaned up because the Lambda is scheduled immediately after `upload_to_s3()` succeeds, before any downstream call can fail.
+**Image flow** (mirrors PDF exactly, different detection pipeline):
+1. `POST /image/scan` — validates JPEG or PNG (Content-Type + magic bytes + `Image.verify()`), max 5 MB, uploads to S3 (`images/{user_id}/{token}/original.{jpg|png}`), schedules Lambda cleanup, extracts text via Textract (`extract_text_from_s3_object`), detects PII with Comprehend, maps offsets to bboxes, calls Rekognition `detect_faces` (always, not conditional). Returns `{ job_id, entities[], expires_at }`.
+2. Client filters entities
+3. `POST /image/redact` — same ownership/TTL checks, applies Pillow black-box redactions, uploads unique output key, returns `{ download_url, expires_at }`.
 
-Only the `Job` row (job_id, user_id, original_s3_key) and source PDF persist between calls. Entity data and bboxes travel in HTTP payloads — no PII is written to the DB.
+The Lambda fires at `job.created_at + JOB_TTL`, deletes every S3 object under the job prefix (original + all redacted versions), and deletes the Job row. The S3 key structure `{type}/{user_id}/{token}/` is identical for both flows — `schedule_job_expiry` works unchanged since it parses the token from `s3_key.split("/")[2]`.
+
+Only the `Job` row (job_id, user_id, original_s3_key) and source file persist between calls. Entity data and bboxes travel in HTTP payloads — no PII is written to the DB.
 
 ### Ephemeral Storage (S3)
 
 All S3 cleanup is handled by the per-job Lambda, which fires ~1 hour after scan:
-1. Lists all objects under the job prefix (`pdfs/{user_id}/{token}/`)
-2. Deletes each object (original PDF + all redacted versions)
+1. Lists all objects under the job prefix (`pdfs/{user_id}/{token}/` or `images/{user_id}/{token}/`)
+2. Deletes each object (original file + all redacted versions)
 3. Deletes the Job DB row
 
 The S3 bucket lifecycle rule (1-day expiration) is a fallback for any objects the Lambda misses.
@@ -279,7 +285,7 @@ When adding tests for endpoints that call AWS services, mock at the service-func
 Current patch targets:
 - `app.routers.text.detect_pii_entities` — mock in `tests/test_text_router.py` to control Comprehend output without a real AWS call
 - `app.routers.pdf.upload_to_s3` — mock in `tests/test_pdf_router.py` to skip real S3 upload
-- `app.routers.pdf.extract_text_from_pdf_s3` — mock in `tests/test_pdf_router.py` to return controlled Textract output
+- `app.routers.pdf.extract_text_from_s3_object` — mock in `tests/test_pdf_router.py` to return controlled Textract output
 - `app.routers.pdf.detect_pii_entities` — mock in `tests/test_pdf_router.py` to control Comprehend output
 - `app.routers.pdf.download_from_s3` — mock in `tests/test_pdf_router.py` (redact endpoint)
 - `app.routers.pdf.generate_presigned_url` — mock in `tests/test_pdf_router.py` (redact endpoint)
@@ -287,11 +293,20 @@ Current patch targets:
 - `app.routers.pdf.detect_faces` — mock in `tests/test_pdf_router.py` (scan endpoint, face detection)
 - `app.routers.pdf.detect_barcodes` — mock in `tests/test_pdf_router.py` (scan endpoint, QR/barcode detection)
 - `app.routers.pdf.schedule_job_expiry` — mocked via autouse fixture in `tests/test_pdf_router.py`; individual tests that assert call args patch it explicitly at test level
+- `app.routers.image.upload_to_s3` — mock in `tests/test_image_router.py` to skip real S3 upload
+- `app.routers.image.extract_text_from_s3_object` — mock in `tests/test_image_router.py` to return controlled Textract output
+- `app.routers.image.detect_pii_entities` — mock in `tests/test_image_router.py` to control Comprehend output
+- `app.routers.image.detect_faces` — mock in `tests/test_image_router.py` (scan endpoint, face detection)
+- `app.routers.image.detect_barcodes` — mock in `tests/test_image_router.py` (scan endpoint, QR/barcode detection)
+- `app.routers.image.download_from_s3` — mock in `tests/test_image_router.py` (redact endpoint)
+- `app.routers.image.generate_presigned_url` — mock in `tests/test_image_router.py` (redact endpoint)
+- `app.routers.image.apply_image_redactions` — mock in `tests/test_image_router.py` (redact endpoint)
+- `app.routers.image.schedule_job_expiry` — mocked via autouse fixture in `tests/test_image_router.py`
 - `app.services.usage.record_usage_event` — do not mock in router tests; let it write real rows and assert via the `db` fixture. Test the helper in isolation in `tests/test_usage_service.py`.
 
 `app/routers/users.py` and `app/routers/usage.py` have no AWS calls and no patch targets. Tests for `/usage/*` endpoints seed `UsageEvent` rows directly via the `db` fixture in `tests/test_usage_router.py`.
 
-`get_current_user_any_auth` is **not mocked** in tests. Tests that call text/pdf endpoints with an API key seed a real key row by calling `POST /users/me/api-key` in test setup, then pass the returned key as a Bearer token. No patching needed — the dependency reads the real in-memory test DB.
+`get_current_user_any_auth` is **not mocked** in tests. Tests that call text/pdf/image endpoints with an API key seed a real key row by calling `POST /users/me/api-key` in test setup, then pass the returned key as a Bearer token. No patching needed — the dependency reads the real in-memory test DB.
 
 To test an AWS service function in isolation (e.g., verifying the Comprehend call shape and response mapping), use `botocore.stub.Stubber` — it is built into botocore and requires no additional dependency. See `tests/test_detection_service.py` for the pattern.
 

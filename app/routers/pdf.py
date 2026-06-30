@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 import fitz
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -34,7 +35,6 @@ from app.database import get_db
 from app.dependencies import enforce_token_limit, get_current_user_any_auth
 from app.models import Job, User
 from app.schemas import (
-    BoundingBox,
     EntitySource,
     ErrorRead,
     EventType,
@@ -47,7 +47,7 @@ from app.schemas import (
 )
 from app.services.barcodes import detect_barcodes
 from app.services.detection import detect_pii_entities
-from app.services.extraction import WordSpan, extract_text_from_pdf_s3
+from app.services.extraction import bboxes_for_entity, extract_text_from_s3_object
 from app.services.redaction import apply_pdf_redactions
 from app.services.rekognition import detect_faces
 from app.services.scheduler import JOB_TTL, schedule_job_expiry
@@ -60,14 +60,6 @@ router = APIRouter(tags=["pdf"])
 
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 _ORIGINAL_FILENAME = "original.pdf"
-
-
-def _bboxes_for_entity(start: int, end: int, word_spans: list[WordSpan]) -> list[BoundingBox]:
-    return [
-        BoundingBox(left=ws.left, top=ws.top, width=ws.width, height=ws.height)
-        for ws in word_spans
-        if ws.start_char < end and ws.end_char > start
-    ]
 
 
 @router.post(
@@ -127,7 +119,7 @@ def scan_pdf(
         # get_images(), so the render can't be gated on has_images.
         # pix owns its pixel data independently of doc, so it stays valid
         # after this `with` block closes (used by detect_barcodes below).
-        pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
+        pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), colorspace=fitz.csRGB, alpha=False)
         page_image_bytes = pix.tobytes(output="jpeg") if has_images else None
 
     s3_key = f"pdfs/{current_user.id}/{secrets.token_urlsafe(16)}/{_ORIGINAL_FILENAME}"
@@ -143,10 +135,11 @@ def scan_pdf(
     # Job row is created only after all calls succeed. If any raises, the S3 object is
     # orphaned — the Lambda cleans it up if scheduling succeeded; the lifecycle rule (1-day)
     # is the fallback if scheduling failed.
-    text, word_spans = extract_text_from_pdf_s3(settings.S3_BUCKET, s3_key)
+    text, word_spans = extract_text_from_s3_object(settings.S3_BUCKET, s3_key)
     raw_entities = detect_pii_entities(text)
     face_detections = detect_faces(page_image_bytes) if page_image_bytes else []
-    barcode_detections = detect_barcodes(pix)
+    # fitz renders RGB (n=3, no alpha by default); frombytes converts to PIL for detect_barcodes.
+    barcode_detections = detect_barcodes(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
 
     job = Job(user_id=current_user.id, original_s3_key=s3_key)
     db.add(job)
@@ -166,7 +159,7 @@ def scan_pdf(
             start_offset=e.start_offset,
             end_offset=e.end_offset,
             confidence=e.confidence,
-            bboxes=_bboxes_for_entity(e.start_offset, e.end_offset, word_spans),
+            bboxes=bboxes_for_entity(e.start_offset, e.end_offset, word_spans),
         )
         for e in raw_entities
     ]

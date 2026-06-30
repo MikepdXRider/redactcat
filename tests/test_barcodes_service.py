@@ -1,18 +1,16 @@
 # Unit tests for the pyzbar barcode/QR detection service (detect_barcodes).
 # Only the native libzbar boundary (pyzbar.decode) is stubbed; the polygon/rect
-# bbox math and normalization run for real against a real grayscale pixmap.
+# bbox math and normalization run for real against a real grayscale PIL image.
 from unittest.mock import patch
 
-import fitz
+from PIL import Image
 from pyzbar.pyzbar import Decoded, Point, Rect
 
 from app.services.barcodes import detect_barcodes
 
 
-def _pixmap() -> fitz.Pixmap:
-    with fitz.open() as doc:
-        page = doc.new_page(width=612, height=792)
-        return page.get_pixmap()
+def _pil_image() -> Image.Image:
+    return Image.new("RGB", (612, 792), color=(255, 255, 255))
 
 
 def _decoded(
@@ -24,7 +22,7 @@ def _decoded(
 
 
 def test_detect_barcodes_uses_polygon_for_bbox() -> None:
-    pix = _pixmap()
+    img = _pil_image()
     # Polygon is a slightly rotated quad; rect is deliberately different so a
     # passing assertion proves the polygon branch ran (and did not raise).
     polygon = [Point(10, 20), Point(50, 22), Point(48, 60), Point(12, 58)]
@@ -35,21 +33,21 @@ def test_detect_barcodes_uses_polygon_for_bbox() -> None:
         polygon=polygon,
     )
     with patch("app.services.barcodes.decode", return_value=[decoded]):
-        results = detect_barcodes(pix)
+        results = detect_barcodes(img)
 
     assert len(results) == 1
     result = results[0]
     assert result.entity_type == "QR_CODE"
     assert result.text == "https://example.com"
     # bbox derived from polygon min/max, normalized and rounded to 4 decimal places
-    assert result.bbox.left == round(10 / pix.width, 4)
-    assert result.bbox.top == round(20 / pix.height, 4)
-    assert result.bbox.width == round((50 - 10) / pix.width, 4)
-    assert result.bbox.height == round((60 - 20) / pix.height, 4)
+    assert result.bbox.left == round(10 / img.width, 4)
+    assert result.bbox.top == round(20 / img.height, 4)
+    assert result.bbox.width == round((50 - 10) / img.width, 4)
+    assert result.bbox.height == round((60 - 20) / img.height, 4)
 
 
 def test_detect_barcodes_falls_back_to_rect_when_polygon_empty() -> None:
-    pix = _pixmap()
+    img = _pil_image()
     decoded = _decoded(
         code_type="CODE128",
         data=b"012345678905",
@@ -57,22 +55,22 @@ def test_detect_barcodes_falls_back_to_rect_when_polygon_empty() -> None:
         polygon=[],
     )
     with patch("app.services.barcodes.decode", return_value=[decoded]):
-        results = detect_barcodes(pix)
+        results = detect_barcodes(img)
 
     assert len(results) == 1
     result = results[0]
     assert result.entity_type == "BARCODE"
     assert result.text == "012345678905"
     # bbox derived from rect, normalized and rounded to 4 decimal places
-    assert result.bbox.left == round(15 / pix.width, 4)
-    assert result.bbox.top == round(25 / pix.height, 4)
-    assert result.bbox.width == round(30 / pix.width, 4)
-    assert result.bbox.height == round(35 / pix.height, 4)
+    assert result.bbox.left == round(15 / img.width, 4)
+    assert result.bbox.top == round(25 / img.height, 4)
+    assert result.bbox.width == round(30 / img.width, 4)
+    assert result.bbox.height == round(35 / img.height, 4)
 
 
 def test_detect_barcodes_no_codes_returns_empty() -> None:
-    pix = _pixmap()
+    img = _pil_image()
     with patch("app.services.barcodes.decode", return_value=[]):
-        results = detect_barcodes(pix)
+        results = detect_barcodes(img)
 
     assert results == []
