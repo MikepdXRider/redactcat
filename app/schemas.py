@@ -203,7 +203,7 @@ class ImageRedactRead(BaseModel):
 
 
 class ApiKeyRead(BaseModel):
-    key: str = Field(description="Full API key, prefixed with `rcat_`. **Shown only once — store it immediately.** Pass as `Authorization: Bearer <key>` on `/text/*` and `/pdf/*` endpoints.")
+    key: str = Field(description="Full API key, prefixed with `rcat_`. **Shown only once — store it immediately.** Pass as `Authorization: Bearer <key>` on `/text/*`, `/pdf/*`, and `/image/*` endpoints.")
 
 
 class ApiKeyMetadataRead(BaseModel):
