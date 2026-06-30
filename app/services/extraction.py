@@ -1,8 +1,9 @@
-"""PDF text extraction via AWS Textract.
+"""Document text extraction via AWS Textract.
 
-Calls detect_document_text (synchronous, single-page only) with an S3 object reference.
-Returns the assembled text string and per-word character spans with normalized bounding
-boxes so the pdf router can map Comprehend character offsets back to Textract bboxes.
+Accepts PDF, JPEG, or PNG via S3 object reference. Calls detect_document_text
+(synchronous, single-page only) and returns the assembled text string plus per-word
+character spans with normalized bounding boxes, so callers can map Comprehend
+character offsets back to Textract bboxes.
 
 Reading order is derived from the PAGE→LINE→WORD CHILD relationship chain in the
 Textract response rather than block array order, which is not guaranteed to be sorted.
@@ -26,7 +27,7 @@ class WordSpan:
     height: float
 
 
-def extract_text_from_pdf_s3(bucket: str, key: str) -> tuple[str, list[WordSpan]]:
+def extract_text_from_s3_object(bucket: str, key: str) -> tuple[str, list[WordSpan]]:
     response = _textract.detect_document_text(
         Document={"S3Object": {"Bucket": bucket, "Name": key}}
     )
