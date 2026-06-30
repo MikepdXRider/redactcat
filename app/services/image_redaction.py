@@ -18,7 +18,9 @@ from app.schemas import ImageEntityRead
 
 def apply_image_redactions(image_bytes: bytes, entities: list[ImageEntityRead]) -> bytes:
     img = Image.open(io.BytesIO(image_bytes))
-    fmt = img.format or "JPEG"
+    if img.format is None:
+        raise ValueError(f"unknown image format: {img.format!r}")
+    fmt = img.format
     draw = ImageDraw.Draw(img)
     w, h = img.size
     for entity in entities:
