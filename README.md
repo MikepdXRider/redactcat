@@ -1,6 +1,6 @@
 # redactcat
 
-**redactcat** is a deployed PII detection and redaction API. It accepts plain text and single-page PDFs and routes each through a multi-stage AWS detection pipeline — Comprehend for text PII, Textract for scanned PDFs, Rekognition for faces in embedded images, and pyzbar for barcodes and QR codes. Users review detected entities before redaction; no PII is stored in the database at any point.
+**redactcat** is a deployed PII detection and redaction API. It accepts plain text, single-page PDFs, and JPEG/PNG images, routing each through a multi-stage AWS detection pipeline — Comprehend for text PII, Textract for OCR, Rekognition for face detection, and pyzbar for barcodes and QR codes. Users review detected entities before redaction; no PII is stored in the database at any point.
 
 Live at `https://api.redactcat.com` · [Interactive docs](https://api.redactcat.com/docs)
 
@@ -18,9 +18,10 @@ Live at `https://api.redactcat.com` · [Interactive docs](https://api.redactcat.
 | Type checking | mypy + pydantic plugin | Catches type mismatches at call boundaries statically, independent of test coverage |
 | Testing | pytest + SQLite in-memory | Fast, fully isolated, no external services required for CI |
 | PII detection | AWS Comprehend | Managed NLP; sync API handles up to 100KB inline with no infrastructure to maintain |
-| PDF text extraction | AWS Textract | Handles scanned PDFs where text isn't directly exposed; sync API for single-page documents |
+| Text/image extraction | AWS Textract | Handles scanned PDFs and images where text isn't directly exposed; sync S3-source API |
 | PDF redaction | PyMuPDF | Applies permanent black-box redactions at bounding box coordinates |
-| Face detection | AWS Rekognition | Detects faces in embedded PDF images; sync inline-bytes API, no infrastructure to maintain |
+| Image redaction | Pillow | Draws filled black rectangles over bbox regions in JPEG/PNG images |
+| Face detection | AWS Rekognition | Detects faces in standalone images and embedded PDF images; sync inline-bytes API |
 | Barcode/QR detection | pyzbar + libzbar0 | Decodes QR codes and barcodes rendered as vector or raster content on the page |
 
 ## Design Decisions
@@ -31,18 +32,22 @@ Access tokens are short-lived JWTs (30min) with no server-side storage. Refresh 
 **Stateless text scan and redact**
 Text passes through in-memory — no PII is written to the database or S3 at any point. `/text/scan` returns the source text alongside detected entities; the client can POST that response body directly to `/text/redact` after filtering. The client controls which entities to redact (by confidence threshold, entity type, etc.) and can produce multiple redacted variants from a single scan.
 
-**Minimal-stateful PDF scan and redact**
-PDFs use a session model: `/pdf/scan` uploads the source file to S3, schedules a one-time cleanup Lambda ~1 hour out, and returns detected entities with bounding boxes and an `expires_at` timestamp. `/pdf/redact` accepts the filtered entity list and applies redactions; it can be called multiple times on the same job within the TTL window — each call produces a distinct redacted file with its own presigned download URL. Jobs expire after 1 hour (410 Gone). The Lambda owns all cleanup: it deletes every S3 object under the job prefix and the DB row at expiry. Only the `Job` row (job_id, user_id, s3_key) persists between calls — entity data and bounding boxes travel in HTTP payloads, never written to the DB. The scan response shape matches the redact request body exactly; the client filters the entity list and POSTs it back without reshaping.
+**Minimal-stateful PDF and image scan and redact**
+PDFs and images share an identical session model: the scan endpoint uploads the source file to S3, schedules a one-time cleanup Lambda ~1 hour out, and returns detected entities with bounding boxes and an `expires_at` timestamp. The redact endpoint accepts the filtered entity list and applies redactions; it can be called multiple times on the same job within the TTL window — each call produces a distinct redacted file with its own presigned download URL. Jobs expire after 1 hour (410 Gone). The Lambda owns all cleanup: it deletes every S3 object under the job prefix and the DB row at expiry. Only the `Job` row (job_id, user_id, s3_key) persists between calls — entity data and bounding boxes travel in HTTP payloads, never written to the DB. The scan response shape matches the redact request body exactly; the client filters the entity list and POSTs it back without reshaping.
 
 A single `/pdf/scan` call runs three detection pipelines in sequence:
 1. **Text PII** — S3 → Textract (text + word bboxes) → Comprehend (PII at character offsets) → map offsets back to word bboxes. Textract is used rather than PyMuPDF so that scanned PDFs with no directly exposed text are handled correctly.
 2. **Faces** — if the page has embedded images, the rendered page pixmap (JPEG) is sent to Rekognition `detect_faces`; each face becomes a `REKOGNITION` entity with a normalized bbox.
 3. **Barcodes/QR codes** — the rendered page pixmap (grayscale) is passed to pyzbar `decode`; decoded symbols become `PYZBAR` entities with decoded text and normalized bboxes derived from the polygon corners. This runs unconditionally because QR codes and barcodes are often vector graphics that don't appear in the embedded image list.
 
-All three sources return bounding boxes as normalized 0–1 fractions of page dimensions. The `source` field on each entity (`COMPREHEND`, `REKOGNITION`, or `PYZBAR`) lets the client distinguish detection origin.
+A single `/image/scan` call runs two detection pipelines in sequence:
+1. **Text PII** — S3 → Textract (text + word bboxes) → Comprehend (PII at character offsets) → map offsets back to word bboxes. Same pipeline as PDF; `extract_text_from_s3_object` accepts JPEG/PNG via S3 reference identically.
+2. **Faces** — image bytes are sent to Rekognition `detect_faces` unconditionally (unlike PDF, where face detection is conditional on embedded raster images).
+
+All sources return bounding boxes as normalized 0–1 fractions of page/image dimensions. The `source` field on each entity (`COMPREHEND`, `REKOGNITION`, or `PYZBAR`) lets the client distinguish detection origin.
 
 **Long-lived API keys**
-Processing endpoints (`/text/*`, `/pdf/*`) accept either a short-lived JWT or a long-lived API key as a Bearer token. Keys are `rcat_`-prefixed, generated with `secrets.token_urlsafe(32)`, and stored as SHA-256 hashes (deterministic lookup, unlike bcrypt). One key per user; `POST /users/me/api-key` generates or rotates. Account management endpoints (`/users/me/*`, `/auth/*`) remain JWT-only — a key cannot manage itself.
+Processing endpoints (`/text/*`, `/pdf/*`, `/image/*`) accept either a short-lived JWT or a long-lived API key as a Bearer token. Keys are `rcat_`-prefixed, generated with `secrets.token_urlsafe(32)`, and stored as SHA-256 hashes (deterministic lookup, unlike bcrypt). One key per user; `POST /users/me/api-key` generates or rotates. Account management endpoints (`/users/me/*`, `/auth/*`) remain JWT-only — a key cannot manage itself.
 
 **Naive UTC datetimes**
 All datetimes are computed in UTC and stored timezone-naive (`datetime.now(UTC).replace(tzinfo=None)`). SQLite has no native timezone support; PostgreSQL `TIMESTAMP WITHOUT TIME ZONE` accepts naive values. The UTC convention is enforced at the application layer — no mixed-offset data enters the DB.
@@ -106,6 +111,8 @@ The API key is stored locally and never sent through the AI's conversation conte
 | POST | /text/redact | ✓‡ | Apply redactions to text; returns redacted string |
 | POST | /pdf/scan | ✓‡§ | Upload single-page PDF; runs Textract (text PII), Rekognition (faces), and pyzbar (barcodes/QR); returns job_id + entities with bboxes |
 | POST | /pdf/redact | ✓‡ | Apply redactions to PDF; returns presigned download URL and expires_at; can be called multiple times per job |
+| POST | /image/scan | ✓‡§ | Upload JPEG or PNG; runs Textract (text PII) and Rekognition (faces); returns job_id + entities with bboxes |
+| POST | /image/redact | ✓‡ | Apply redactions to image; returns presigned download URL and expires_at; can be called multiple times per job |
 | GET | /mcp/server.py | — | Download the RedactCat MCP server script |
 | GET | /mcp/install.sh | — | Download the one-liner MCP install script |
 
@@ -142,6 +149,20 @@ Returns: { "download_url": "https://...", "expires_at": "..." } ← presigned S3
 ```
 
 The scan response can be posted directly to redact — filter the `entities` array to select which PII to redact. `source` is `COMPREHEND`, `REKOGNITION`, or `PYZBAR`. Bounding boxes are normalized (0–1 fractions of page dimensions) regardless of detection source. Constraints: single-page PDFs only, 10 MB max. Jobs expire after 1 hour (`expires_at`). The presigned URL TTL matches `expires_at` — all URLs from a job are valid until the job window closes and the Lambda deletes the underlying S3 objects. Multiple redact calls on the same job each produce a distinct output file.
+
+### Image workflow
+
+```
+POST /image/scan
+Body:    multipart/form-data — file (JPEG or PNG, max 5 MB)
+Returns: { "job_id": 1, "expires_at": "2026-01-01T01:00:00", "entities": [{ "source", "entity_type", "text", "start_offset", "end_offset", "confidence", "bboxes": [{ "left", "top", "width", "height" }] }] }
+
+POST /image/redact
+Body:    { "job_id": 1, "entities": [...] }                    ← filtered scan response
+Returns: { "download_url": "https://...", "expires_at": "..." } ← presigned S3 URL (TTL matches expires_at)
+```
+
+Same session model as PDF — filter the `entities` array and POST it back to redact. `source` is `COMPREHEND` (text PII), `REKOGNITION` (face), or `PYZBAR` (QR code/barcode). Bounding boxes are normalized 0–1 fractions of image dimensions. Constraints: JPEG or PNG only, 5 MB max (Textract synchronous + Rekognition inline-bytes limit). Jobs expire after 1 hour. Multiple redact calls on the same job each produce a distinct output file.
 
 ## Infrastructure & Deployment
 
@@ -254,7 +275,7 @@ The CI/CD pipeline targets `linux/amd64` when pushing to ECR — no platform fla
 | `JWT_ALGORITHM` | No | `HS256` | JWT signing algorithm |
 | `JWT_EXPIRE_MINUTES` | No | `30` | Access token lifetime in minutes |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `30` | Refresh token lifetime in days |
-| `S3_BUCKET` | **Yes** | — | S3 bucket name for ephemeral PDF job storage; app will not start without it |
+| `S3_BUCKET` | **Yes** | — | S3 bucket name for ephemeral PDF and image job storage; app will not start without it |
 | `AWS_PROFILE` | Yes† | — | Named AWS profile from `~/.aws/credentials`; provides credentials and region |
 
 †Required locally for Comprehend, Textract, Rekognition, and S3. Not used in production — App Runner uses the instance IAM role. Set in shell (`AWS_PROFILE=x uv run uvicorn ...`); not injected automatically from `.env`.
@@ -276,20 +297,22 @@ redactcat/
 │   ├── routers/
 │   │   ├── auth.py        # Register, login, logout, token refresh
 │   │   ├── health.py      # Health check
+│   │   ├── image.py       # Image PII scan and redaction (stateful, S3-backed)
 │   │   ├── mcp.py         # /mcp/server.py and /mcp/install.sh — public distribution endpoints
 │   │   ├── pdf.py         # PDF PII scan and redaction (stateful, S3-backed)
 │   │   ├── text.py        # Text PII scan and redaction (stateless)
 │   │   ├── usage.py       # /usage/summary and /usage/history — current-month token reporting
 │   │   └── users.py       # User profile (get, update, delete) and API key management
 │   └── services/
-│       ├── auth.py        # API key prefix constant and hash helper — shared by dependencies.py and routers/users.py
-│       ├── barcodes.py    # pyzbar QR code and barcode detection from rendered page pixmap
-│       ├── detection.py   # AWS Comprehend PII detection
-│       ├── extraction.py  # AWS Textract PDF text extraction + word bbox mapping
-│       ├── redaction.py   # Text redaction (string substitution) and PDF redaction (PyMuPDF)
-│       ├── rekognition.py # AWS Rekognition face detection in embedded images
-│       ├── storage.py     # S3 upload, download, presigned URL
-│       └── usage.py       # Usage event recording — token costs per AWS call, best-effort DB insert
+│       ├── auth.py           # API key prefix constant and hash helper — shared by dependencies.py and routers/users.py
+│       ├── barcodes.py       # pyzbar QR code and barcode detection from rendered page pixmap
+│       ├── detection.py      # AWS Comprehend PII detection
+│       ├── extraction.py     # AWS Textract document text extraction + word bbox mapping (PDF and image)
+│       ├── image_redaction.py # Pillow black-box image redaction at normalized bbox coordinates
+│       ├── redaction.py      # Text redaction (string substitution) and PDF redaction (PyMuPDF)
+│       ├── rekognition.py    # AWS Rekognition face detection
+│       ├── storage.py        # S3 upload, download, presigned URL
+│       └── usage.py          # Usage event recording — token costs per AWS call, best-effort DB insert
 ├── tests/
 │   ├── conftest.py              # Fixtures: engine, db session, TestClient
 │   ├── test_auth_router.py      # Auth endpoint tests
@@ -298,6 +321,7 @@ redactcat/
 │   ├── test_health_router.py    # Health check test
 │   ├── test_mcp_router.py       # /mcp/server.py and /mcp/install.sh endpoint tests
 │   ├── test_migrations.py       # Alembic upgrade/downgrade integration tests
+│   ├── test_image_router.py     # /image/scan and /image/redact endpoint tests
 │   ├── test_pdf_router.py       # /pdf/scan and /pdf/redact endpoint tests
 │   ├── test_rekognition_service.py # Rekognition service unit tests (botocore Stubber)
 │   ├── test_redaction_service.py # PDF redaction service unit tests
