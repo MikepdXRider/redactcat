@@ -407,6 +407,46 @@ def test_scan_aws_failure_does_not_create_job(client_no_raise: TestClient, db: S
     assert db.query(Job).count() == 0
 
 
+def test_scan_calls_schedule_job_expiry(client: TestClient, jpeg_bytes: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.image.upload_to_s3"),
+        patch("app.routers.image.extract_text_from_s3_object", return_value=("", [])),
+        patch("app.routers.image.detect_pii_entities", return_value=[]),
+        patch("app.routers.image.detect_faces", return_value=[]),
+        patch("app.routers.image.detect_barcodes", return_value=[]),
+        patch("app.routers.image.schedule_job_expiry") as mock_schedule,
+    ):
+        response = client.post(
+            "/image/scan",
+            files={"file": ("test.jpg", jpeg_bytes, "image/jpeg")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+    mock_schedule.assert_called_once()
+    s3_key = mock_schedule.call_args[0][0]
+    assert s3_key.startswith("images/")
+    assert "/original.jpg" in s3_key
+
+
+def test_scan_scheduler_failure_does_not_fail_scan(client: TestClient, jpeg_bytes: bytes) -> None:
+    tokens = _register(client)
+    with (
+        patch("app.routers.image.upload_to_s3"),
+        patch("app.routers.image.extract_text_from_s3_object", return_value=("", [])),
+        patch("app.routers.image.detect_pii_entities", return_value=[]),
+        patch("app.routers.image.detect_faces", return_value=[]),
+        patch("app.routers.image.detect_barcodes", return_value=[]),
+        patch("app.routers.image.schedule_job_expiry", side_effect=Exception("EventBridge unavailable")),
+    ):
+        response = client.post(
+            "/image/scan",
+            files={"file": ("test.jpg", jpeg_bytes, "image/jpeg")},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 200
+
+
 # --- POST /image/redact ---
 
 def test_redact_unauthenticated(client: TestClient, jpeg_bytes: bytes) -> None:
