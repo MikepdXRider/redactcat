@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Job, UsageEvent
-from app.schemas import BoundingBox, DetectedEntity, EventType
+from app.schemas import BoundingBox, DetectedEntity, EventType, InputType
 from app.services.barcodes import BarcodeDetection
 from app.services.extraction import WordSpan
 from app.services.rekognition import FaceDetection
@@ -183,8 +183,10 @@ def test_scan_file_too_large(client: TestClient) -> None:
 
 
 def test_scan_token_limit_exceeded(client: TestClient, db: Session, jpeg_bytes: bytes) -> None:
+    from app.models import User
+
     tokens = _register(client)
-    user = db.execute(select(__import__("app.models", fromlist=["User"]).User)).scalars().first()
+    user = db.execute(select(User)).scalars().first()
     assert user is not None
     _seed_usage(db, user.id, 50_000)
     response = client.post(
@@ -539,6 +541,19 @@ def test_redact_returns_download_url(client: TestClient, jpeg_bytes: bytes) -> N
     assert set(redact.keys()) == {"download_url", "expires_at"}
     assert redact["download_url"] == "https://s3.example.com/redacted.jpg"
     assert redact["expires_at"] is not None
+
+
+def test_redact_records_image_redaction_event(client: TestClient, db: Session, jpeg_bytes: bytes) -> None:
+    tokens = _register(client)
+    scan = _do_scan(client, tokens, jpeg_bytes)
+    _do_redact(client, tokens, scan)
+
+    events = db.execute(select(UsageEvent)).scalars().all()
+    redact_events = [e for e in events if e.event_type == EventType.IMAGE_REDACTION]
+    assert len(redact_events) == 1
+    assert redact_events[0].input_type == InputType.IMAGE
+    assert redact_events[0].token_cost == 0
+    assert redact_events[0].job_id == scan["job_id"]
 
 
 def test_redact_unique_s3_key_per_call(client: TestClient, jpeg_bytes: bytes) -> None:
