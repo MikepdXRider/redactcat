@@ -182,8 +182,8 @@ class PdfRedactRead(BaseModel):
 
 
 class ImageEntityRead(PdfEntityRead):
-    source: EntitySource = Field(description="Which detector found this entity: `COMPREHEND` (text PII) or `REKOGNITION` (face).")
-    bboxes: list[BoundingBox] = Field(description="Image-relative bounding boxes in normalized coordinates. One box per word for text entities; one box for faces.")
+    source: EntitySource = Field(description="Which detector found this entity: `COMPREHEND` (text PII), `REKOGNITION` (face), or `PYZBAR` (QR code/barcode).")
+    bboxes: list[BoundingBox] = Field(description="Image-relative bounding boxes in normalized coordinates. One box per word for text entities; one box for faces and barcodes.")
 
 
 class ImageScanRead(BaseModel):
