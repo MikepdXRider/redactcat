@@ -515,6 +515,22 @@ def test_redact_missing_s3_object(client: TestClient, jpeg_bytes: bytes) -> None
     assert response.status_code == 410
 
 
+def test_redact_unexpected_s3_error_returns_500(client_no_raise: TestClient, jpeg_bytes: bytes) -> None:
+    from botocore.exceptions import ClientError
+
+    tokens = _register(client_no_raise)
+    scan = _do_scan(client_no_raise, tokens, jpeg_bytes)
+
+    unexpected_error = ClientError({"Error": {"Code": "InternalError", "Message": "AWS problem"}}, "GetObject")
+    with patch("app.routers.image.download_from_s3", side_effect=unexpected_error):
+        response = client_no_raise.post(
+            "/image/redact",
+            json={"job_id": scan["job_id"], "entities": []},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+    assert response.status_code == 500
+
+
 def test_redact_returns_download_url(client: TestClient, jpeg_bytes: bytes) -> None:
     tokens = _register(client)
     scan = _do_scan(client, tokens, jpeg_bytes)
