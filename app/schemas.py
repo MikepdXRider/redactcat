@@ -151,7 +151,7 @@ class EntitySource(StrEnum):
     """Which detector produced the entity.
 
     - `COMPREHEND`: text PII detected by Amazon Comprehend
-    - `REKOGNITION`: a face detected by Amazon Rekognition (only present when the page contains embedded raster images)
+    - `REKOGNITION`: a face detected by Amazon Rekognition
     - `PYZBAR`: a QR code or barcode decoded by pyzbar
     """
 
