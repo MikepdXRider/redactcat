@@ -136,7 +136,7 @@ def scan_pdf(
     # orphaned — the Lambda cleans it up if scheduling succeeded; the lifecycle rule (1-day)
     # is the fallback if scheduling failed.
     text, word_spans = extract_text_from_s3_object(settings.S3_BUCKET, s3_key)
-    raw_entities = detect_pii_entities(text)
+    raw_entities = [] if not text else detect_pii_entities(text)
     face_detections = detect_faces(page_image_bytes) if page_image_bytes else []
     # fitz renders RGB (n=3, no alpha by default); frombytes converts to PIL for detect_barcodes.
     barcode_detections = detect_barcodes(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
