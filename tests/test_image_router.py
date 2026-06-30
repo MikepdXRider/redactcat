@@ -368,6 +368,29 @@ def test_scan_usage_events_recorded(client: TestClient, db: Session, jpeg_bytes:
     assert EventType.REKOGNITION_FACE in event_types
 
 
+def test_scan_image_with_api_key(client: TestClient, jpeg_bytes: bytes) -> None:
+    tokens = _register(client)
+    api_key_resp = client.post(
+        "/users/me/api-key",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    ).json()
+    raw_key = api_key_resp["key"]
+
+    with (
+        patch("app.routers.image.upload_to_s3"),
+        patch("app.routers.image.extract_text_from_s3_object", return_value=("", [])),
+        patch("app.routers.image.detect_pii_entities", return_value=[]),
+        patch("app.routers.image.detect_faces", return_value=[]),
+        patch("app.routers.image.detect_barcodes", return_value=[]),
+    ):
+        response = client.post(
+            "/image/scan",
+            files={"file": ("test.jpg", jpeg_bytes, "image/jpeg")},
+            headers={"Authorization": f"Bearer {raw_key}"},
+        )
+    assert response.status_code == 200
+
+
 def test_scan_aws_failure_does_not_create_job(client_no_raise: TestClient, db: Session, jpeg_bytes: bytes) -> None:
     tokens = _register(client_no_raise)
     with (
