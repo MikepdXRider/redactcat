@@ -126,7 +126,8 @@ def scan_image(
     # orphaned — the Lambda cleans it up if scheduling succeeded; the lifecycle rule (1-day)
     # is the fallback if scheduling failed.
     text, word_spans = extract_text_from_s3_object(settings.S3_BUCKET, s3_key)
-    raw_entities = detect_pii_entities(text)
+
+    raw_entities = [] if not text else detect_pii_entities(text)
     face_detections = detect_faces(image_bytes)
     # Re-open after verify() — verify() exhausts the image object.
     barcode_detections = detect_barcodes(Image.open(io.BytesIO(image_bytes)))
@@ -139,7 +140,6 @@ def scan_image(
     record_usage_event(db, current_user.id, EventType.TEXTRACT_PAGE, InputType.IMAGE, quantity=1, job_id=job.id)
     record_usage_event(db, current_user.id, EventType.COMPREHEND_CHAR, InputType.IMAGE, quantity=max(len(text), COMPREHEND_MIN_CHARS), job_id=job.id)
     record_usage_event(db, current_user.id, EventType.REKOGNITION_FACE, InputType.IMAGE, quantity=1, job_id=job.id)
-
     text_entities = [
         ImageEntityRead(
             source=EntitySource.COMPREHEND,
