@@ -48,6 +48,17 @@ def test_detect_pii_entities_empty_response() -> None:
     assert entities == []
 
 
+def test_detect_pii_entities_empty_text_short_circuits() -> None:
+    # Comprehend rejects an empty Text argument; PDF/image callers can pass "" when
+    # Textract extracts no text (e.g. a blank page or text-less photo), so this must
+    # return [] without ever constructing a client or calling AWS.
+    with patch("app.services.detection.boto3.client") as mock_client:
+        entities = detect_pii_entities("")
+
+    assert entities == []
+    mock_client.assert_not_called()
+
+
 def test_detect_pii_entities_multiple_types() -> None:
     client = boto3.client("comprehend", region_name="us-east-1")
     text = "Jane Smith, SSN 123-45-6789"
